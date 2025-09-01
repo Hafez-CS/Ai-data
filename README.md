@@ -1,1 +1,177 @@
-# Ai-data
+# پیش‌بینی مالی پیشرفته (Advanced Financial Predictor)
+
+## معرفی
+این پروژه یک برنامه گرافیکی (GUI) مبتنی بر PyQt5 است که برای تحلیل داده‌های مالی و پیش‌بینی مقادیر عددی با استفاده از مدل‌های یادگیری ماشین طراحی شده است. این برنامه امکان بارگذاری فایل‌های CSV، پاک‌سازی داده‌ها، داده‌کاوی، مقایسه ستون‌ها، و پیش‌بینی با مدل‌های مختلف را فراهم می‌کند. همچنین، قابلیت نمایش نمودارهای مختلف مانند پراکندگی، هیستوگرام، جعبه‌ای و نقشه حرارتی همبستگی را دارد.
+
+---
+
+## Introduction
+This project is a PyQt5-based graphical user interface (GUI) application designed for financial data analysis and prediction using machine learning models. It allows users to load CSV files, clean data, perform data mining, compare columns, and make predictions with various models. It also provides visualizations such as scatter plots, histograms, box plots, and correlation heatmaps.
+
+## ویژگی‌ها
+- **بارگذاری داده‌ها**: بارگذاری فایل‌های CSV برای تحلیل.
+- **پاک‌سازی داده‌ها**: پر کردن مقادیر گمشده و حذف داده‌های پرت با روش IQR.
+- **داده‌کاوی**: ارائه آمار توصیفی، ماتریس همبستگی، و گزارش داده‌های پرت.
+- **مقایسه ستون‌ها**: نمایش نمودار پراکندگی دوبعدی یا سه‌بعدی برای ۲ یا ۳ ستون انتخابی.
+- **نمایش پراکندگی داده‌ها**: نمایش نمودارهای جفتی (Pairplot) برای ستون‌های عددی.
+- **پیش‌بینی**: آموزش و ارزیابی مدل‌های یادگیری ماشین شامل:
+  - رگرسیون خطی (Linear Regression)
+  - جنگل تصادفی (Random Forest Regressor)
+  - درخت تصمیم (Decision Tree Regressor)
+  - تقویت گرادیان (Gradient Boosting Regressor)
+  - ماشین بردار پشتیبان (Support Vector Regressor)
+  - XGBoost (در صورت نصب)
+- **نمایش نتایج**: نمایش مقادیر واقعی و پیش‌بینی‌شده در جدول و نمودار پراکندگی.
+- **رابط کاربری بهبودیافته**: استفاده از QGridLayout، نوار وضعیت، و استایل‌دهی مدرن.
+
+---
+
+## Features
+- **Data Loading**: Load CSV files for analysis.
+- **Data Cleaning**: Fill missing values and remove outliers using the IQR method.
+- **Data Mining**: Provide descriptive statistics, correlation matrix, and outlier reports.
+- **Column Comparison**: Display 2D or 3D scatter plots for 2 or 3 selected columns.
+- **Data Scatter Plot**: Show pairplots for numeric columns.
+- **Prediction**: Train and evaluate machine learning models, including:
+  - Linear Regression
+  - Random Forest Regressor
+  - Decision Tree Regressor
+  - Gradient Boosting Regressor
+  - Support Vector Regressor
+  - XGBoost (if installed)
+- **Result Visualization**: Display actual vs. predicted values in a table and scatter plot.
+- **Enhanced UI**: Uses QGridLayout, status bar, and modern styling.
+
+## پیش‌نیازها
+برای اجرای این برنامه، نیاز به نصب کتابخانه‌های زیر دارید:
+
+```bash
+pip install pandas numpy scikit-learn PyQt5 matplotlib seaborn xgboost
+```
+
+**توجه**: کتابخانه `xgboost` اختیاری است. اگر نصب نشود، گزینه XGBoost در برنامه غیرفعال خواهد بود.
+
+### پشتیبانی از متن فارسی
+برای نمایش صحیح متن فارسی در رابط کاربری و نمودارها، نصب کتابخانه‌های زیر و یک فونت فارسی (مانند Vazir) توصیه می‌شود:
+
+```bash
+pip install arabic-reshaper python-bidi
+```
+
+1. فونت Vazir را از [اینجا](https://github.com/rastikerdar/vazir-font) دانلود کنید.
+2. فونت را در سیستم نصب کنید:
+   - ویندوز: فایل `.ttf` را به `C:\Windows\Fonts` کپی کنید.
+   - لینوکس/مک: مراحل نصب فونت سیستم را دنبال کنید.
+3. کد را برای استفاده از فونت Vazir به‌روزرسانی کنید (در صورت نیاز).
+
+---
+
+## Requirements
+To run this application, install the following libraries:
+
+```bash
+pip install pandas numpy scikit-learn PyQt5 matplotlib seaborn xgboost
+```
+
+**Note**: The `xgboost` library is optional. If not installed, the XGBoost option will be unavailable.
+
+### Persian Text Support
+To properly render Persian text in the GUI and plots, install the following libraries and a Persian font (e.g., Vazir):
+
+```bash
+pip install arabic-reshaper python-bidi
+```
+
+1. Download the Vazir font from [here](https://github.com/rastikerdar/vazir-font).
+2. Install the font on your system:
+   - Windows: Copy the `.ttf` file to `C:\Windows\Fonts`.
+   - Linux/macOS: Follow system-specific font installation steps.
+3. Update the code to use the Vazir font (if needed).
+
+## نصب و اجرا
+1. فایل `financial_predictor.py` را در یک دایرکتوری ذخیره کنید.
+2. کتابخانه‌های مورد نیاز را نصب کنید (بخش پیش‌نیازها).
+3. برنامه را اجرا کنید:
+
+```bash
+python financial_predictor.py
+```
+
+---
+
+## Installation and Running
+1. Save the `financial_predictor.py` file in a directory.
+2. Install the required libraries (see Requirements).
+3. Run the application:
+
+```bash
+python financial_predictor.py
+```
+
+## راهنمای استفاده
+1. **بارگذاری فایل CSV**:
+   - روی دکمه "بارگذاری فایل CSV" کلیک کنید و یک فایل CSV انتخاب کنید.
+   - ستون‌های فایل در منوی کشویی هدف و لیست مقایسه ظاهر می‌شوند.
+2. **پاک‌سازی داده‌ها**:
+   - دکمه "پاک‌سازی داده‌ها" را فشار دهید تا مقادیر گمشده پر شوند و داده‌های پرت حذف شوند.
+   - گزارش پاک‌سازی در یک پنجره نمایش داده می‌شود.
+3. **داده‌کاوی**:
+   - دکمه "داده‌کاوی" را فشار دهید تا آمار توصیفی، همبستگی‌ها، و گزارش داده‌های پرت نمایش داده شود.
+4. **مقایسه ستون‌ها**:
+   - ۲ یا ۳ ستون را از لیست انتخاب کنید (با Ctrl+کلیک).
+   - دکمه "مقایسه ستون‌ها" را فشار دهید تا نمودار پراکندگی دوبعدی یا سه‌بعدی نمایش داده شود.
+5. **نمایش پراکندگی داده‌ها**:
+   - دکمه "نمایش پراکندگی داده‌ها" را فشار دهید تا نمودارهای جفتی برای حداکثر ۴ ستون عددی نمایش داده شود.
+6. **پیش‌بینی**:
+   - یک ستون هدف از منوی کشویی انتخاب کنید.
+   - یک مدل پیش‌بینی (مانند رگرسیون خطی) را انتخاب کنید.
+   - دکمه "شروع پیش‌بینی" را فشار دهید تا مدل آموزش ببیند و نتایج (MAE، RMSE، R²) در یک جدول و نمودار نمایش داده شود.
+
+---
+
+## Usage Guide
+1. **Load CSV File**:
+   - Click the "Load CSV File" button and select a CSV file.
+   - The file's columns will appear in the target dropdown and comparison list.
+2. **Data Cleaning**:
+   - Click the "Clean Data" button to fill missing values and remove outliers.
+   - A cleaning report will be displayed in a dialog.
+3. **Data Mining**:
+   - Click the "Data Mining" button to view descriptive statistics, correlation matrix, and outlier report.
+4. **Column Comparison**:
+   - Select 2 or 3 columns from the list (Ctrl+click for multiple selections).
+   - Click the "Compare Columns" button to display a 2D or 3D scatter plot.
+5. **Data Scatter Plot**:
+   - Click the "Show Data Scatter" button to display pairplots for up to 4 numeric columns.
+6. **Prediction**:
+   - Select a target column from the dropdown.
+   - Choose a prediction model (e.g., Linear Regression).
+   - Click the "Start Prediction" button to train the model and view results (MAE, RMSE, R²) in a table and scatter plot.
+
+## نکات
+- **فرمت فایل CSV**: فایل CSV باید شامل ستون‌های عددی برای پیش‌بینی و مقایسه باشد. ستون‌های غیرعددی برای مدل‌سازی نادیده گرفته می‌شوند.
+- **پشتیبانی از فارسی**: برای نمایش صحیح متن فارسی، نصب فونت Vazir و کتابخانه‌های `arabic-reshaper` و `python-bidi` ضروری است.
+- **عملکرد**: برای مجموعه داده‌های بزرگ، ممکن است تولید نمودارها زمان‌بر باشد. در صورت نیاز، داده‌ها را نمونه‌برداری کنید.
+- **خطاها**: در صورت بروز خطا، پیام‌های خطا در نوار وضعیت و پنجره‌های پیام نمایش داده می‌شوند.
+
+---
+
+## Notes
+- **CSV File Format**: The CSV file must include numeric columns for prediction and comparison. Non-numeric columns are ignored for modeling.
+- **Persian Text Support**: To properly display Persian text, install the Vazir font and the `arabic-reshaper` and `python-bidi` libraries.
+- **Performance**: For large datasets, plot generation may be slow. Consider sampling the data if needed.
+- **Error Handling**: Error messages are displayed in the status bar and message boxes if issues occur.
+
+## توسعه‌دهندگان
+برای افزودن قابلیت‌های جدید یا بهبود برنامه:
+- **مقایسه چند مدل**: می‌توانید قابلیتی اضافه کنید که چندین مدل را به طور همزمان مقایسه کند.
+- **پشتیبانی از داده‌های دسته‌ای**: اضافه کردن رمزگذاری (مانند one-hot encoding) برای پشتیبانی از ستون‌های غیرعددی.
+- **بهبود رابط کاربری**: افزودن گزینه‌های سفارشی‌سازی برای رنگ و اندازه نمودارها.
+
+---
+
+## Developers
+To add new features or improve the application:
+- **Multi-Model Comparison**: Add functionality to compare multiple models simultaneously.
+- **Categorical Data Support**: Implement encoding (e.g., one-hot encoding) to support non-numeric columns.
+- **UI Enhancements**: Add customization options for plot colors and sizes.
