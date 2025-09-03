@@ -4,7 +4,8 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGridLayout, QPushButton, QFileDialog, QLabel,
     QComboBox, QMessageBox, QTableWidget, QTableWidgetItem, QListWidget,
-    QStatusBar, QScrollArea, QVBoxLayout, QDialog, QTextEdit
+    QStatusBar, QScrollArea, QVBoxLayout, QDialog, QTextEdit, QHBoxLayout,
+    QStyle  # Add this import
 )
 from PyQt5.QtCore import Qt
 from sklearn.model_selection import train_test_split
@@ -41,103 +42,154 @@ class DataAnalysisDialog(QDialog):
 class AdvancedFinancialPredictor(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("پیش‌بینی مالی پیشرفته")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("سیستم پیش‌بینی مالی")
+        self.setGeometry(100, 100, 1400, 900)
+        self.setStyleSheet("""
+            QWidget {
+                font-family: 'Segoe UI', 'B Nazanin';
+                font-size: 12px;
+                background-color: #f0f2f5;
+            }
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                min-width: 120px;
+                margin: 5px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QLabel {
+                color: #37474F;
+                font-weight: bold;
+            }
+            QComboBox, QListWidget {
+                border: 1px solid #BBDEFB;
+                border-radius: 4px;
+                padding: 5px;
+                background-color: white;
+            }
+            QTableWidget {
+                background-color: white;
+                border: 1px solid #BBDEFB;
+                border-radius: 4px;
+            }
+            QScrollArea {
+                border: 1px solid #BBDEFB;
+                background-color: white;
+                border-radius: 4px;
+            }
+            QStatusBar {
+                background-color: #E3F2FD;
+                color: #1565C0;
+            }
+        """)
 
-        # Main layout
-        self.grid_layout = QGridLayout()
-        self.setLayout(self.grid_layout)
+        # Main layout using QVBoxLayout for better organization
+        main_layout = QVBoxLayout()
+        self.setLayout(main_layout)
 
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.grid_layout.addWidget(self.status_bar, 7, 0, 1, 3)
-
-        # File loading section
+        # Top panel for file operations
+        top_panel = QHBoxLayout()
+        
+        # File loading group
+        file_group = QVBoxLayout()
         self.btn_load = QPushButton("بارگذاری فایل CSV")
-        self.btn_load.clicked.connect(self.load_csv)
-        self.btn_load.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px;")
-        self.grid_layout.addWidget(self.btn_load, 0, 0, 1, 1)
-
-        # Target column selection
+        self.btn_load.setIcon(self.style().standardIcon(QStyle.SP_FileDialogStart))
+        file_group.addWidget(self.btn_load)
+        
+        # Target selection group
+        target_group = QVBoxLayout()
         self.label_target = QLabel("ستون هدف:")
         self.combo_target = QComboBox()
-        self.grid_layout.addWidget(self.label_target, 0, 1, 1, 1)
-        self.grid_layout.addWidget(self.combo_target, 0, 2, 1, 1)
+        target_group.addWidget(self.label_target)
+        target_group.addWidget(self.combo_target)
 
-        # Column comparison selection
-        self.label_compare = QLabel("ستون‌ها برای مقایسه (۲ یا ۳ ستون):")
+        top_panel.addLayout(file_group)
+        top_panel.addLayout(target_group)
+        main_layout.addLayout(top_panel)
+
+        # Middle panel for analysis controls
+        middle_panel = QHBoxLayout()
+        
+        # Column selection group
+        column_group = QVBoxLayout()
+        self.label_compare = QLabel("ستون‌های مقایسه:")
         self.list_compare = QListWidget()
-        self.list_compare.setSelectionMode(QListWidget.MultiSelection)
-        self.btn_compare = QPushButton("مقایسه ستون‌ها")
-        self.btn_compare.clicked.connect(self.compare_columns)
-        self.btn_compare.setStyleSheet("background-color: #2196F3; color: white; padding: 8px;")
-        self.grid_layout.addWidget(self.label_compare, 1, 0, 1, 1)
-        self.grid_layout.addWidget(self.list_compare, 1, 1, 1, 2)
-        self.grid_layout.addWidget(self.btn_compare, 2, 0, 1, 1)
+        self.list_compare.setMaximumHeight(150)
+        column_group.addWidget(self.label_compare)
+        column_group.addWidget(self.list_compare)
 
-        # Data cleaning button
+        # Control buttons group
+        buttons_group = QVBoxLayout()
         self.btn_clean = QPushButton("پاک‌سازی داده‌ها")
-        self.btn_clean.clicked.connect(self.clean_data)
-        self.btn_clean.setStyleSheet("background-color: #FFC107; color: white; padding: 8px;")
-        self.grid_layout.addWidget(self.btn_clean, 2, 1, 1, 1)
-
-        # Data mining button
         self.btn_mine = QPushButton("داده‌کاوی")
-        self.btn_mine.clicked.connect(self.mine_data)
-        self.btn_mine.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px;")
-        self.grid_layout.addWidget(self.btn_mine, 2, 2, 1, 1)
+        self.btn_scatter = QPushButton("نمودار پراکندگی")
+        self.btn_compare = QPushButton("مقایسه ستون‌ها")
+        
+        buttons_group.addWidget(self.btn_clean)
+        buttons_group.addWidget(self.btn_mine)
+        buttons_group.addWidget(self.btn_scatter)
+        buttons_group.addWidget(self.btn_compare)
 
-        # Data scatter button
-        self.btn_scatter = QPushButton("نمایش پراکندگی داده‌ها")
-        self.btn_scatter.clicked.connect(self.show_scatter_plot)
-        self.btn_scatter.setStyleSheet("background-color: #00BCD4; color: white; padding: 8px;")
-        self.grid_layout.addWidget(self.btn_scatter, 3, 0, 1, 1)
+        middle_panel.addLayout(column_group)
+        middle_panel.addLayout(buttons_group)
+        main_layout.addLayout(middle_panel)
 
-        # Model selection
-        self.label_model = QLabel("مدل‌های پیش‌بینی:")
+        # Model selection and prediction panel
+        model_panel = QHBoxLayout()
+        self.label_model = QLabel("انتخاب مدل:")
         self.combo_model = QComboBox()
-        models = [
-            "Linear Regression",
-            "Random Forest Regressor",
-            "Decision Tree Regressor",
-            "Gradient Boosting Regressor",
-            "Support Vector Regressor"
-        ]
+        models = ["Linear Regression", "Random Forest", "Decision Tree", 
+                 "Gradient Boosting", "SVR"]
         if xgb:
-            models.append("XGBoost Regressor")
+            models.append("XGBoost")
         self.combo_model.addItems(models)
-        self.grid_layout.addWidget(self.label_model, 3, 1, 1, 1)
-        self.grid_layout.addWidget(self.combo_model, 3, 2, 1, 1)
-
-        # Predict button
+        
         self.btn_predict = QPushButton("شروع پیش‌بینی")
-        self.btn_predict.clicked.connect(self.train_and_predict)
-        self.btn_predict.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
-        self.grid_layout.addWidget(self.btn_predict, 4, 0, 1, 1)
+        self.btn_predict.setStyleSheet("background-color: #4CAF50;")
+        
+        model_panel.addWidget(self.label_model)
+        model_panel.addWidget(self.combo_model)
+        model_panel.addWidget(self.btn_predict)
+        main_layout.addLayout(model_panel)
 
-        # Results table
+        # Results panel
+        results_panel = QHBoxLayout()
+        
+        # Table for results
         self.table_results = QTableWidget()
-        self.grid_layout.addWidget(self.table_results, 4, 1, 1, 2)
-
-        # Scroll area for Matplotlib canvas
-        self.figure = plt.Figure()
+        self.table_results.setMinimumHeight(200)
+        
+        # Canvas for plots
+        self.figure = plt.Figure(figsize=(8, 6))
         self.canvas = FigureCanvas(self.figure)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidget(self.canvas)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setMinimumHeight(600)
-        self.grid_layout.addWidget(self.scroll_area, 5, 0, 2, 3)
+        
+        results_panel.addWidget(self.table_results, 1)
+        results_panel.addWidget(self.scroll_area, 2)
+        main_layout.addLayout(results_panel)
 
+        # Status bar
+        self.status_bar = QStatusBar()
+        main_layout.addWidget(self.status_bar)
+
+        # Connect signals
+        self.btn_load.clicked.connect(self.load_csv)
+        self.btn_clean.clicked.connect(self.clean_data)
+        self.btn_mine.clicked.connect(self.mine_data)
+        self.btn_scatter.clicked.connect(self.show_scatter_plot)
+        self.btn_compare.clicked.connect(self.compare_columns)
+        self.btn_predict.clicked.connect(self.train_and_predict)
+
+        # Initialize
         self.df = None
-        self.status_bar.showMessage("لطفاً فایل CSV را بارگذاری کنید.")
-
-        # Apply stylesheet
-        self.setStyleSheet("""
-            QWidget { font-size: 14px; }
-            QPushButton { border-radius: 5px; }
-            QComboBox, QListWidget { padding: 5px; }
-            QScrollArea { border: 1px solid #ccc; background-color: #f9f9f9; }
-        """)
+        self.status_bar.showMessage("آماده برای بارگذاری فایل")
 
     def load_csv(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "انتخاب فایل CSV", "", "CSV Files (*.csv)")
@@ -376,15 +428,15 @@ class AdvancedFinancialPredictor(QWidget):
             model_name = self.combo_model.currentText()
             if model_name == "Linear Regression":
                 model = LinearRegression()
-            elif model_name == "Random Forest Regressor":
+            elif model_name == "Random Forest":
                 model = RandomForestRegressor(n_estimators=100, random_state=42)
-            elif model_name == "Decision Tree Regressor":
+            elif model_name == "Decision Tree":
                 model = DecisionTreeRegressor(random_state=42)
-            elif model_name == "Gradient Boosting Regressor":
+            elif model_name == "Gradient Boosting":
                 model = GradientBoostingRegressor(random_state=42)
-            elif model_name == "Support Vector Regressor":
+            elif model_name == "SVR":
                 model = SVR()
-            elif model_name == "XGBoost Regressor" and xgb:
+            elif model_name == "XGBoost" and xgb:
                 model = xgb.XGBRegressor(random_state=42)
             else:
                 QMessageBox.critical(self, "خطا", "مدل انتخاب‌شده پشتیبانی نمی‌شود.")
