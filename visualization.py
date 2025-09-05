@@ -1,0 +1,105 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from PyQt5.QtWidgets import QMessageBox
+
+class DataVisualizer:
+    def __init__(self, parent):
+        self.parent = parent
+
+    def visualize_data(self):
+        if self.parent.df is None:
+            return
+
+        self.parent.figure.clear()
+        numeric_cols = self.parent.df.select_dtypes(include=np.number).columns.tolist()
+
+        if numeric_cols:
+            self.parent.figure.set_size_inches(14, 12)
+            ax1 = self.parent.figure.add_subplot(221)
+            if len(numeric_cols) >= 2:
+                ax1.scatter(self.parent.df[numeric_cols[0]], self.parent.df[numeric_cols[1]], alpha=0.7)
+                ax1.set_xlabel(numeric_cols[0])
+                ax1.set_ylabel(numeric_cols[1])
+                ax1.set_title(f"Scatter: {numeric_cols[0]} vs {numeric_cols[1]}")
+                ax1.tick_params(axis='x', rotation=45)
+
+            ax2 = self.parent.figure.add_subplot(222)
+            hist_cols = numeric_cols[:2]
+            if hist_cols:
+                for i, col in enumerate(hist_cols):
+                    ax2.hist(self.parent.df[col], bins=20, alpha=0.5, label=col, density=True)
+                ax2.legend()
+                ax2.set_title("Histogram ستون‌ها")
+                ax2.tick_params(axis='x', rotation=45)
+
+            ax3 = self.parent.figure.add_subplot(223)
+            if hist_cols:
+                self.parent.df[hist_cols].boxplot(ax=ax3)
+                ax3.set_title("Box Plot ستون‌ها")
+                ax3.tick_params(axis='x', rotation=45)
+
+            ax4 = self.parent.figure.add_subplot(224)
+            sns.heatmap(self.parent.df[numeric_cols].corr(), annot=True, cmap="coolwarm", ax=ax4)
+            ax4.set_title("Heatmap همبستگی")
+
+            self.parent.figure.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15, wspace=0.3, hspace=0.4)
+            self.parent.canvas.draw()
+            self.parent.status_bar.showMessage("نمودارهای اولیه تولید شدند.")
+
+    def show_scatter_plot(self):
+        if self.parent.df is None:
+            QMessageBox.warning(self.parent, "هشدار", "لطفاً ابتدا فایل CSV را بارگذاری کنید.")
+            self.parent.status_bar.showMessage("هیچ فایلی بارگذاری نشده است.")
+            return
+
+        self.parent.figure.clear()
+        numeric_cols = self.parent.df.select_dtypes(include=np.number).columns.tolist()
+        if len(numeric_cols) < 2:
+            QMessageBox.warning(self.parent, "هشدار", "حداقل دو ستون عددی برای نمایش پراکندگی مورد نیاز است.")
+            self.parent.status_bar.showMessage("ستون‌های عددی کافی نیست.")
+            return
+
+        self.parent.figure.set_size_inches(14, 12)
+        plot_cols = numeric_cols[:4]
+        g = sns.pairplot(self.parent.df[plot_cols], diag_kind="kde", plot_kws={"alpha": 0.7})
+        self.parent.figure = g.figure
+        self.parent.canvas = self.parent.FigureCanvas(self.parent.figure)
+        self.parent.scroll_area.setWidget(self.parent.canvas)
+        self.parent.canvas.draw()
+        self.parent.status_bar.showMessage("نمودار پراکندگی داده‌ها تولید شد.")
+
+    def compare_columns(self):
+        selected_columns = [item.text() for item in self.parent.list_compare.selectedItems()]
+        if len(selected_columns) not in [2, 3]:
+            QMessageBox.warning(self.parent, "هشدار", "لطفاً ۲ یا ۳ ستون انتخاب کنید.")
+            self.parent.status_bar.showMessage("انتخاب نامعتبر: ۲ یا ۳ ستون مورد نیاز است.")
+            return
+
+        numeric_cols = self.parent.df.select_dtypes(include=np.number).columns.tolist()
+        if not all(col in numeric_cols for col in selected_columns):
+            QMessageBox.warning(self.parent, "هشدار", "همه ستون‌های انتخاب‌شده باید عددی باشند.")
+            self.parent.status_bar.showMessage("ستون‌های غیرعددی انتخاب شده‌اند.")
+            return
+
+        self.parent.figure.clear()
+        self.parent.figure.set_size_inches(14, 12)
+        if len(selected_columns) == 2:
+            ax = self.parent.figure.add_subplot(111)
+            ax.scatter(self.parent.df[selected_columns[0]], self.parent.df[selected_columns[1]], alpha=0.7)
+            ax.set_xlabel(selected_columns[0])
+            ax.set_ylabel(selected_columns[1])
+            ax.set_title(f"مقایسه: {selected_columns[0]} vs {selected_columns[1]}")
+            ax.tick_params(axis='x', rotation=45)
+        else:
+            ax = self.parent.figure.add_subplot(111, projection='3d')
+            ax.scatter(self.parent.df[selected_columns[0]], self.parent.df[selected_columns[1]], self.parent.df[selected_columns[2]], alpha=0.7)
+            ax.set_xlabel(selected_columns[0])
+            ax.set_ylabel(selected_columns[1])
+            ax.set_zlabel(selected_columns[2])
+            ax.set_title(f"مقایسه 3D: {selected_columns[0]} vs {selected_columns[1]} vs {selected_columns[2]}")
+            ax.tick_params(axis='x', rotation=45)
+
+        self.parent.figure.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15, wspace=0.3, hspace=0.4)
+        self.parent.canvas.draw()
+        self.parent.status_bar.showMessage(f"مقایسه ستون‌ها: {', '.join(selected_columns)}")
