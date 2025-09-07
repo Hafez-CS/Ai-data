@@ -90,6 +90,8 @@ class AdvancedFinancialPredictorUI(QWidget):
         column_group = QVBoxLayout()
         self.label_compare = QLabel("ستون‌های مقایسه:")
         self.list_compare = QListWidget()
+        self.list_compare.setSelectionMode(QListWidget.ExtendedSelection)  # فعال کردن انتخاب چندگانه
+        self.list_compare.setToolTip("برای انتخاب ۲ یا ۳ ستون، از Ctrl+کلیک استفاده کنید")
         self.list_compare.setMaximumHeight(150)
         column_group.addWidget(self.label_compare)
         column_group.addWidget(self.list_compare)

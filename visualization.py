@@ -91,23 +91,23 @@ class DataVisualizer:
             logging.error(f"خطا در تولید نمودار پراکندگی: {str(e)}", exc_info=True)
             self.parent.status_bar.showMessage(f"خطا در تولید نمودار پراکندگی: {str(e)}")
             QMessageBox.critical(self.parent, "خطا", f"خطا در تولید نمودار پراکندگی: {str(e)}")
-
+    
     def compare_columns(self):
         try:
             selected_columns = [item.text() for item in self.parent.list_compare.selectedItems()]
             if len(selected_columns) not in [2, 3]:
-                logging.error("انتخاب نامعتبر: ۲ یا ۳ ستون مورد نیاز است.")
-                QMessageBox.warning(self.parent, "هشدار", "لطفاً ۲ یا ۳ ستون انتخاب کنید.")
-                self.parent.status_bar.showMessage("انتخاب نامعتبر: ۲ یا ۳ ستون مورد نیاز است.")
+                logging.error(f"تعداد ستون‌های انتخاب‌شده نامعتبر است: {len(selected_columns)} ستون انتخاب شده است.")
+                QMessageBox.warning(self.parent, "هشدار", "لطفاً دقیقاً ۲ یا ۳ ستون را با Ctrl+کلیک انتخاب کنید.")
+                self.parent.status_bar.showMessage("انتخاب نامعتبر: لطفاً ۲ یا ۳ ستون انتخاب کنید.")
                 return
-
+    
             numeric_cols = self.parent.df.select_dtypes(include=np.number).columns.tolist()
             if not all(col in numeric_cols for col in selected_columns):
                 logging.error("ستون‌های غیرعددی برای مقایسه انتخاب شده‌اند.")
                 QMessageBox.warning(self.parent, "هشدار", "همه ستون‌های انتخاب‌شده باید عددی باشند.")
                 self.parent.status_bar.showMessage("ستون‌های غیرعددی انتخاب شده‌اند.")
                 return
-
+    
             self.parent.figure.clear()
             self.parent.figure.set_size_inches(14, 12)
             if len(selected_columns) == 2:
@@ -125,7 +125,7 @@ class DataVisualizer:
                 ax.set_zlabel(selected_columns[2])
                 ax.set_title(f"مقایسه 3D: {selected_columns[0]} vs {selected_columns[1]} vs {selected_columns[2]}")
                 ax.tick_params(axis='x', rotation=45)
-
+    
             self.parent.figure.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15, wspace=0.3, hspace=0.4)
             self.parent.canvas.draw()
             self.parent.status_bar.showMessage(f"مقایسه ستون‌ها: {', '.join(selected_columns)}")
