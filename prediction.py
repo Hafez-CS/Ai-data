@@ -57,48 +57,60 @@ class Predictor:
                 self.parent.status_bar.showMessage("داده‌های آزمایشی کافی نیست.")
                 return
 
-            model_name = self.parent.combo_model.currentText()
-            if model_name == "Linear Regression":
-                model = LinearRegression()
-            elif model_name == "Random Forest":
-                model = RandomForestRegressor(n_estimators=100, random_state=42)
-            elif model_name == "Decision Tree":
-                model = DecisionTreeRegressor(random_state=42)
-            elif model_name == "Gradient Boosting":
-                model = GradientBoostingRegressor(random_state=42)
-            elif model_name == "SVR":
-                model = SVR()
-            elif model_name == "XGBoost" and xgb:
-                model = xgb.XGBRegressor(random_state=42)
-            else:
-                QMessageBox.critical(self.parent, "خطا", "مدل انتخاب‌شده پشتیبانی نمی‌شود.")
-                self.parent.status_bar.showMessage("مدل انتخاب‌شده پشتیبانی نمی‌شود.")
-                return
+            # تعریف مدل‌ها
+            models = {
+                "Linear Regression": LinearRegression(),
+                "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
+                "Decision Tree": DecisionTreeRegressor(random_state=42),
+                "Gradient Boosting": GradientBoostingRegressor(random_state=42),
+                "SVR": SVR()
+            }
+            if xgb:
+                models["XGBoost"] = xgb.XGBRegressor(random_state=42)
 
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
+            # آزمایش همه مدل‌ها و انتخاب بهترین
+            best_model_name = None
+            best_r2 = -float('inf')
+            best_model = None
+            best_y_pred = None
 
-            mae = mean_absolute_error(y_test, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            r2 = r2_score(y_test, y_pred)
-            QMessageBox.information(self.parent, "نتایج مدل", f"MAE: {mae:.2f}\nRMSE: {rmse:.2f}\nR²: {r2:.2f}")
-            self.parent.status_bar.showMessage(f"پیش‌بینی با {model_name} انجام شد.")
+            for model_name, model in models.items():
+                model.fit(X_train, y_train)
+                y_pred = model.predict(X_test)
+                r2 = r2_score(y_test, y_pred)
+                if r2 > best_r2:
+                    best_r2 = r2
+                    best_model_name = model_name
+                    best_model = model
+                    best_y_pred = y_pred
 
+            # محاسبه معیارها برای بهترین مدل
+            mae = mean_absolute_error(y_test, best_y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, best_y_pred))
+            QMessageBox.information(self.parent, "نتایج مدل",
+                                    f"بهترین مدل: {best_model_name}\n"
+                                    f"MAE: {mae:.2f}\n"
+                                    f"RMSE: {rmse:.2f}\n"
+                                    f"R²: {best_r2:.2f}")
+            self.parent.status_bar.showMessage(f"پیش‌بینی با بهترین مدل ({best_model_name}) انجام شد.")
+
+            # نمایش نتایج در جدول
             self.parent.table_results.setRowCount(len(y_test))
             self.parent.table_results.setColumnCount(2)
             self.parent.table_results.setHorizontalHeaderLabels(["مقادیر واقعی", "مقادیر پیش‌بینی شده"])
             for i in range(len(y_test)):
                 self.parent.table_results.setItem(i, 0, QTableWidgetItem(str(round(y_test.values[i], 2))))
-                self.parent.table_results.setItem(i, 1, QTableWidgetItem(str(round(y_pred[i], 2))))
+                self.parent.table_results.setItem(i, 1, QTableWidgetItem(str(round(best_y_pred[i], 2))))
 
+            # نمایش نمودار پراکندگی
             self.parent.figure.clear()
             self.parent.figure.set_size_inches(14, 12)
             ax = self.parent.figure.add_subplot(111)
-            ax.scatter(y_test, y_pred, alpha=0.7)
+            ax.scatter(y_test, best_y_pred, alpha=0.7)
             ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
             ax.set_xlabel("مقادیر واقعی")
             ax.set_ylabel("مقادیر پیش‌بینی شده")
-            ax.set_title(f"پیش‌بینی {target_column} با {model_name}")
+            ax.set_title(f"پیش‌بینی {target_column} با {best_model_name}")
             self.parent.figure.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
             self.parent.canvas.draw()
 

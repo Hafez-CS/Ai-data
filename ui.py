@@ -110,23 +110,21 @@ class AdvancedFinancialPredictorUI(QWidget):
         main_layout.addLayout(middle_panel)
 
         # Model selection and prediction panel
+        #model_panel = QHBoxLayout()
+        #self.label_model = QLabel("انتخاب مدل:")
+        #self.combo_model = QComboBox()
+        #models = ["Linear Regression", "Random Forest", "Decision Tree", 
+                # "Gradient Boosting", "SVR"]
+        #try:
+        #    import xgboost
+        #    models.append("XGBoost")
+        #except ImportError:
+        #    pass
+        #self.combo_model.addItems(models)
+        #
         model_panel = QHBoxLayout()
-        self.label_model = QLabel("انتخاب مدل:")
-        self.combo_model = QComboBox()
-        models = ["Linear Regression", "Random Forest", "Decision Tree", 
-                 "Gradient Boosting", "SVR"]
-        try:
-            import xgboost
-            models.append("XGBoost")
-        except ImportError:
-            pass
-        self.combo_model.addItems(models)
-        
         self.btn_predict = QPushButton("شروع پیش‌بینی")
         self.btn_predict.setStyleSheet("background-color: #4CAF50;")
-        
-        model_panel.addWidget(self.label_model)
-        model_panel.addWidget(self.combo_model)
         model_panel.addWidget(self.btn_predict)
         main_layout.addLayout(model_panel)
 
