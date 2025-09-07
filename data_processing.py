@@ -1,7 +1,16 @@
 import pandas as pd
 import numpy as np
+import logging
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from dialog import DataAnalysisDialog
+
+# تنظیم لاگ‌گیری (در صورت نیاز، می‌توان در main.py تنظیم کرد)
+logging.basicConfig(
+    filename='app_errors.log',
+    filemode='a',
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.ERROR
+)
 
 class DataProcessor:
     def __init__(self, parent):
@@ -20,6 +29,7 @@ class DataProcessor:
                 QMessageBox.information(self.parent, "موفقیت", "فایل با موفقیت بارگذاری شد!")
                 self.parent.visualizer.visualize_data()
             except Exception as e:
+                logging.error(f"خطا در بارگذاری فایل CSV: {str(e)}", exc_info=True)
                 self.parent.status_bar.showMessage(f"خطا در بارگذاری فایل: {str(e)}")
                 QMessageBox.critical(self.parent, "خطا", f"خطا در بارگذاری فایل: {str(e)}")
 
@@ -61,6 +71,7 @@ class DataProcessor:
             self.parent.status_bar.showMessage("پاک‌سازی داده‌ها با موفقیت انجام شد.")
             self.parent.visualizer.visualize_data()
         except Exception as e:
+            logging.error(f"خطا در پاک‌سازی داده‌ها: {str(e)}", exc_info=True)
             self.parent.status_bar.showMessage(f"خطا در پاک‌سازی داده‌ها: {str(e)}")
             QMessageBox.critical(self.parent, "خطا", f"خطا در پاک‌سازی داده‌ها: {str(e)}")
 
@@ -93,5 +104,6 @@ class DataProcessor:
             dialog.exec_()
             self.parent.status_bar.showMessage("داده‌کاوی با موفقیت انجام شد.")
         except Exception as e:
+            logging.error(f"خطا در داده‌کاوی: {str(e)}", exc_info=True)
             self.parent.status_bar.showMessage(f"خطا در داده‌کاوی: {str(e)}")
             QMessageBox.critical(self.parent, "خطا", f"خطا در داده‌کاوی: {str(e)}")

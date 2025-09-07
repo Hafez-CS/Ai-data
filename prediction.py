@@ -1,4 +1,5 @@
 import numpy as np
+import logging
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
@@ -13,6 +14,14 @@ try:
 except ImportError:
     xgb = None
 
+# تنظیم لاگ‌گیری
+logging.basicConfig(
+    filename='app_errors.log',
+    filemode='a',
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.ERROR
+)
+
 class Predictor:
     def __init__(self, parent):
         self.parent = parent
@@ -26,6 +35,7 @@ class Predictor:
         try:
             target_column = self.parent.combo_target.currentText()
             if self.parent.df[target_column].dtype not in [np.float64, np.int64, np.float32, np.int32]:
+                logging.error("ستون هدف غیرعددی انتخاب شده است.")
                 QMessageBox.critical(self.parent, "خطا", "ستون هدف باید عددی باشد.")
                 self.parent.status_bar.showMessage("ستون هدف غیرعددی است.")
                 return
@@ -35,11 +45,13 @@ class Predictor:
 
             X = X.select_dtypes(include=np.number)
             if X.empty:
+                logging.error("هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
                 QMessageBox.critical(self.parent, "خطا", "هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
                 self.parent.status_bar.showMessage("هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
                 return
 
             if len(X) < 2 or len(y) < 2:
+                logging.error("داده‌های کافی برای آموزش مدل وجود ندارد.")
                 QMessageBox.critical(self.parent, "خطا", "داده‌های کافی برای آموزش مدل وجود ندارد.")
                 self.parent.status_bar.showMessage("داده‌های کافی نیست.")
                 return
@@ -53,6 +65,7 @@ class Predictor:
             X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
             if len(X_test) == 0 or len(y_test) == 0:
+                logging.error("داده‌های آزمایشی کافی نیست.")
                 QMessageBox.critical(self.parent, "خطا", "داده‌های آزمایشی کافی نیست. لطفاً داده‌های بیشتری فراهم کنید.")
                 self.parent.status_bar.showMessage("داده‌های آزمایشی کافی نیست.")
                 return
@@ -75,14 +88,24 @@ class Predictor:
             best_y_pred = None
 
             for model_name, model in models.items():
-                model.fit(X_train, y_train)
-                y_pred = model.predict(X_test)
-                r2 = r2_score(y_test, y_pred)
-                if r2 > best_r2:
-                    best_r2 = r2
-                    best_model_name = model_name
-                    best_model = model
-                    best_y_pred = y_pred
+                try:
+                    model.fit(X_train, y_train)
+                    y_pred = model.predict(X_test)
+                    r2 = r2_score(y_test, y_pred)
+                    if r2 > best_r2:
+                        best_r2 = r2
+                        best_model_name = model_name
+                        best_model = model
+                        best_y_pred = y_pred
+                except Exception as e:
+                    logging.error(f"خطا در آموزش مدل {model_name}: {str(e)}", exc_info=True)
+                    continue  # ادامه با مدل بعدی در صورت خطا
+
+            if best_model is None:
+                logging.error("هیچ مدلی با موفقیت آموزش ندید.")
+                QMessageBox.critical(self.parent, "خطا", "هیچ مدلی با موفقیت آموزش ندید. لطفاً داده‌ها را بررسی کنید.")
+                self.parent.status_bar.showMessage("خطا: هیچ مدلی آموزش ندید.")
+                return
 
             # محاسبه معیارها برای بهترین مدل
             mae = mean_absolute_error(y_test, best_y_pred)
@@ -115,5 +138,6 @@ class Predictor:
             self.parent.canvas.draw()
 
         except Exception as e:
+            logging.error(f"خطا در فرآیند پیش‌بینی: {str(e)}", exc_info=True)
             self.parent.status_bar.showMessage(f"خطا در پیش‌بینی: {str(e)}")
             QMessageBox.critical(self.parent, "خطا", f"خطا در فرآیند پیش‌بینی: {str(e)}")
