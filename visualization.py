@@ -4,7 +4,7 @@ import seaborn as sns
 import logging
 from PyQt5.QtWidgets import QMessageBox
 
-# تنظیم لاگ‌گیری
+
 logging.basicConfig(
     filename='app_errors.log',
     filemode='a',
@@ -71,27 +71,47 @@ class DataVisualizer:
             return
     
         try:
-            self.parent.figure.clear()
-            numeric_cols = self.parent.df.select_dtypes(include=np.number).columns.tolist()
-            if len(numeric_cols) < 2:
-                logging.error("حداقل دو ستون عددی برای نمایش پراکندگی مورد نیاز است.")
-                QMessageBox.warning(self.parent, "هشدار", "حداقل دو ستون عددی برای نمایش پراکندگی مورد نیاز است.")
-                self.parent.status_bar.showMessage("ستون‌های عددی کافی نیست.")
+            x_column = self.parent.combo_target.currentText()
+            y_columns = [item.text() for item in self.parent.list_compare.selectedItems()]
+
+            if not x_column or not y_columns:
+                QMessageBox.warning(self.parent, "هشدار", "لطفاً یک ستون برای محور X و حداقل یک ستون برای محور Y انتخاب کنید.")
+                self.parent.status_bar.showMessage("ستون‌های کافی انتخاب نشده‌اند.")
                 return
-    
+            
+            numeric_cols = self.parent.df.select_dtypes(include=np.number).columns.tolist()
+            if x_column not in numeric_cols or not all(col in numeric_cols for col in y_columns):
+                QMessageBox.warning(self.parent, "هشدار", "همه ستون‌های انتخاب‌شده باید عددی باشند.")
+                self.parent.status_bar.showMessage("ستون‌های غیرعددی انتخاب شده‌اند.")
+                return
+        
+            self.parent.figure.clear()
             self.parent.figure.set_size_inches(14, 12)
-            plot_cols = numeric_cols[:4]
-            g = sns.pairplot(self.parent.df[plot_cols], diag_kind="kde", plot_kws={"alpha": 0.7})
-            self.parent.figure = g.figure
-            # استفاده از canvas موجود به جای ایجاد نمونه جدید
-            self.parent.canvas.draw()  # به‌روزرسانی canvas موجود
-            self.parent.scroll_area.setWidget(self.parent.canvas)
-            self.parent.status_bar.showMessage("نمودار پراکندگی داده‌ها تولید شد.")
+            ax = self.parent.figure.add_subplot(111)
+
+            for y_column in y_columns:
+                ax.scatter(self.parent.df[x_column], self.parent.df[y_column], alpha=0.7, label=f"{y_column} vs {x_column}")
+            
+
+            ax.set_xlabel(x_column)
+            ax.set_ylabel("مقادیر")
+            ax.set_title(f"نمودار پراکندگی: {x_column} در برابر ستون‌های انتخاب‌شده")
+            ax.legend()
+            ax.grid(True)
+            ax.tick_params(axis='x', rotation=45)
+
+            self.parent.figure.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
+            self.parent.canvas.draw()
+            self.parent.status_bar.showMessage(f"نمودار پراکندگی برای {x_column} و {', '.join(y_columns)} تولید شد.")
+
+
+
         except Exception as e:
             logging.error(f"خطا در تولید نمودار پراکندگی: {str(e)}", exc_info=True)
             self.parent.status_bar.showMessage(f"خطا در تولید نمودار پراکندگی: {str(e)}")
             QMessageBox.critical(self.parent, "خطا", f"خطا در تولید نمودار پراکندگی: {str(e)}")
-    
+
+
     def compare_columns(self):
         try:
             selected_columns = [item.text() for item in self.parent.list_compare.selectedItems()]
