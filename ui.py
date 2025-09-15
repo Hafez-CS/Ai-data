@@ -1,13 +1,11 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QListWidget, QTableWidget, QScrollArea, QStatusBar, QFileDialog, 
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QScrollArea, QStatusBar, QFileDialog, 
     QMessageBox, QStyle
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 from data_processing import DataProcessor
-from visualization import DataVisualizer
 from prediction import Predictor
 
 class AdvancedFinancialPredictorUI(QWidget):
@@ -33,16 +31,6 @@ class AdvancedFinancialPredictorUI(QWidget):
             QPushButton:hover {
                 background-color: #1976D2;
             }
-            QLabel {
-                color: #37474F;
-                font-weight: bold;
-            }
-            QComboBox, QListWidget {
-                border: 1px solid #BBDEFB;
-                border-radius: 4px;
-                padding: 5px;
-                background-color: white;
-            }
             QTableWidget {
                 background-color: white;
                 border: 1px solid #BBDEFB;
@@ -59,9 +47,8 @@ class AdvancedFinancialPredictorUI(QWidget):
             }
         """)
 
-        # Initialize data processor, visualizer, and predictor
+        # Initialize data processor and predictor
         self.data_processor = DataProcessor(self)
-        self.visualizer = DataVisualizer(self)
         self.predictor = Predictor(self)
 
         # Main layout
@@ -71,34 +58,11 @@ class AdvancedFinancialPredictorUI(QWidget):
         # Top panel for file operations
         top_panel = QHBoxLayout()
         file_group = QVBoxLayout()
-        self.btn_load = QPushButton("بارگذاری فایل CSV")
+        self.btn_load = QPushButton("بارگذاری فایل CSV یا Excel")
         self.btn_load.setIcon(self.style().standardIcon(QStyle.SP_FileDialogStart))
         file_group.addWidget(self.btn_load)
-
         top_panel.addLayout(file_group)
         main_layout.addLayout(top_panel)
-
-        # Middle panel for analysis controls
-        middle_panel = QHBoxLayout()
-        column_group = QVBoxLayout()
-        self.label_compare = QLabel("ستون‌های مقایسه:")
-        self.list_compare = QListWidget()
-        self.list_compare.setSelectionMode(QListWidget.ExtendedSelection)  # فعال کردن انتخاب چندگانه
-        self.list_compare.setToolTip("برای انتخاب ۲ یا ۳ ستون، از Ctrl+کلیک استفاده کنید")
-        self.list_compare.setMaximumHeight(150)
-        column_group.addWidget(self.label_compare)
-        column_group.addWidget(self.list_compare)
-
-        buttons_group = QVBoxLayout()
-        self.btn_scatter = QPushButton("نمودار پراکندگی")
-        self.btn_compare = QPushButton("مقایسه ستون‌ها")
-        
-        buttons_group.addWidget(self.btn_scatter)
-        buttons_group.addWidget(self.btn_compare)
-
-        middle_panel.addLayout(column_group)
-        middle_panel.addLayout(buttons_group)
-        main_layout.addLayout(middle_panel)
 
         # Model selection and prediction panel
         model_panel = QHBoxLayout()
@@ -128,8 +92,6 @@ class AdvancedFinancialPredictorUI(QWidget):
 
         # Connect signals
         self.btn_load.clicked.connect(self.data_processor.load_csv)
-        self.btn_scatter.clicked.connect(self.visualizer.show_scatter_plot)
-        self.btn_compare.clicked.connect(self.visualizer.compare_columns)
         self.btn_predict.clicked.connect(self.predictor.train_and_predict)
 
         # Initialize

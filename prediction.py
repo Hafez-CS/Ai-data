@@ -11,7 +11,7 @@ import os
 from google import genai
 from google.genai import types
 import matplotlib.pyplot as plt
-import pandas as pd  
+import pandas as pd
 
 try:
     import xgboost as xgb
@@ -30,32 +30,36 @@ class Predictor:
     def __init__(self, parent):
         self.parent = parent
         # تنظیم API Key برای Gemini
-        os.environ['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY', 'AIzaSyBJNUay3LtA_3vjU_M0sayBbQQ0xpdGclY')
+        os.environ['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY', 'AIzaSyAXc2aolIJEQTFtmrnDh8yUbOZ8fNJmXyQ')
         self.client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         self.model = "gemini-2.5-pro"
 
     def analyze_dataset_with_gemini(self, df):
         """تحلیل دیتاست با Gemini API و پیشنهاد بهترین ستون هدف و الگوریتم"""
         try:
+            # نمونه‌برداری از داده‌ها (حداکثر 100 ردیف)
+            sample_size = min(100, len(df))
+            df_sample = df.sample(n=sample_size, random_state=42) if len(df) > sample_size else df
+
             # آماده‌سازی مشخصات دیتاست
             numeric_cols = df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
             all_cols = df.columns.tolist()
-            desc_stats = df.describe(include='all').to_string()
-            corr_matrix = df[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
+            desc_stats = df_sample.describe(include='all').to_string()
+            corr_matrix = df_sample[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
             num_rows, num_cols = df.shape
             missing_values = df.isnull().sum().sum()
 
             # ساخت پرامپت برای Gemini
             prompt = f"""
-            شما یک متخصص یادگیری ماشین هستید. من یک دیتاست با مشخصات زیر دارم:
-            - تعداد ردیف‌ها: {num_rows}
+            شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
+            - تعداد ردیف‌های کل دیتاست: {num_rows}
             - تعداد ستون‌ها: {num_cols}
             - تمام ستون‌ها: {all_cols}
-            - آمار توصیفی:
+            - آمار توصیفی (بر اساس نمونه):
             {desc_stats}
-            - ماتریس همبستگی (برای ستون‌های عددی):
+            - ماتریس همبستگی (برای ستون‌های عددی نمونه):
             {corr_matrix}
-            - تعداد مقادیر گمشده: {missing_values}
+            - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
 
             با توجه به این اطلاعات:
             1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
@@ -96,9 +100,8 @@ class Predictor:
             if xgb:
                 available_models.append("XGBoost")
             
-            # جستجوی ساده برای استخراج
             lower_response = response_text.lower()
-            for col in numeric_cols:  # فقط ستون‌های عددی برای هدف
+            for col in numeric_cols:
                 if col.lower() in lower_response and "target_column" in lower_response:
                     recommended_target = col
                     break
@@ -116,7 +119,7 @@ class Predictor:
 
     def train_and_predict(self):
         if self.parent.df is None:
-            QMessageBox.warning(self.parent, "هشدار", "لطفاً فایل CSV را بارگذاری کنید.")
+            QMessageBox.warning(self.parent, "هشدار", "لطفاً فایل CSV یا Excel را بارگذاری کنید.")
             self.parent.status_bar.showMessage("هیچ فایل یا ستون هدفی انتخاب نشده است.")
             return
 
@@ -138,7 +141,7 @@ class Predictor:
             self.parent.status_bar.showMessage(f"پیش‌بینی با مدل {recommended_model} و ستون هدف {target_column} انجام شد.")
 
             # پردازش تمام ستون‌ها (عددی و غیرعددی)
-            df_processed = pd.get_dummies(self.parent.df, drop_first=True)  # one-hot encoding برای ستون‌های غیرعددی
+            df_processed = pd.get_dummies(self.parent.df, drop_first=True)
             X = df_processed.drop(columns=[target_column])
             y = df_processed[target_column]
 
@@ -161,11 +164,28 @@ class Predictor:
                 self.parent.status_bar.showMessage("داده‌های کافی نیست.")
                 return
 
+            # حذف ستون‌های با واریانس صفر یا کاملاً NaN
+            X = X.loc[:, X.var(numeric_only=True) > 0]  # حذف ستون‌های با واریانس صفر
+            X = X.loc[:, X.notna().any()]  # حذف ستون‌های کاملاً NaN
             X.fillna(X.mean(numeric_only=True), inplace=True)  # پر کردن NaN برای عددی‌ها
             y.fillna(y.mean(), inplace=True)
 
+            # بررسی اینکه داده‌های کافی باقی مانده‌اند
+            if X.empty or len(X.columns) == 0:
+                logging.error("پس از حذف ستون‌های نامعتبر، هیچ ویژگی برای آموزش باقی نماند.")
+                QMessageBox.critical(self.parent, "خطا", "هیچ ویژگی معتبری برای آموزش مدل باقی نماند.")
+                self.parent.status_bar.showMessage("هیچ ویژگی معتبری باقی نماند.")
+                return
+
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X)
+
+            # بررسی مقادیر نامعتبر در X_scaled
+            if np.any(np.isnan(X_scaled)) or np.any(np.isinf(X_scaled)):
+                logging.error("داده‌های استانداردشده شامل مقادیر NaN یا بی‌نهایت هستند.")
+                QMessageBox.critical(self.parent, "خطا", "داده‌های استانداردشده شامل مقادیر نامعتبر (NaN یا بی‌نهایت) هستند.")
+                self.parent.status_bar.showMessage("داده‌های استانداردشده نامعتبر هستند.")
+                return
 
             X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
@@ -204,9 +224,8 @@ class Predictor:
                 self.parent.table_results.setRowCount(0)
 
                 # تولید داده‌های آینده‌نگرانه (فرضی)
-                # فرض می‌کنیم ۵ نقطه فراتر از داده‌های آزمایشی برای پیش‌بینی آینده
                 future_indices = np.arange(len(y_test), len(y_test) + 5)
-                future_X = X_test[-5:]  # استفاده از آخرین داده‌های آزمایشی برای پیش‌بینی آینده
+                future_X = X_test[-5:]
                 future_pred = model.predict(future_X)
 
                 # نمایش نمودار خطی
@@ -215,11 +234,8 @@ class Predictor:
                 ax = self.parent.figure.add_subplot(111)
                 indices = np.arange(len(y_test))
                 
-                # خطوط برای مقادیر واقعی و پیش‌بینی‌شده
                 ax.plot(indices, y_test.values, color='blue', label='مقادیر واقعی', linewidth=2)
                 ax.plot(indices, y_pred, color='orange', label='مقادیر پیش‌بینی‌شده', linewidth=2)
-                
-                # خط برای پیش‌بینی‌های آینده
                 ax.plot(future_indices, future_pred, color='green', linestyle='--', label='پیش‌بینی آینده', linewidth=2)
                 
                 ax.set_xlabel("اندیس داده‌ها")
