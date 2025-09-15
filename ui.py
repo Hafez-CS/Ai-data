@@ -97,13 +97,9 @@ class AdvancedFinancialPredictorUI(QWidget):
         column_group.addWidget(self.list_compare)
 
         buttons_group = QVBoxLayout()
-        self.btn_clean = QPushButton("پاک‌سازی داده‌ها")
-        self.btn_mine = QPushButton("داده‌کاوی")
         self.btn_scatter = QPushButton("نمودار پراکندگی")
         self.btn_compare = QPushButton("مقایسه ستون‌ها")
         
-        buttons_group.addWidget(self.btn_clean)
-        buttons_group.addWidget(self.btn_mine)
         buttons_group.addWidget(self.btn_scatter)
         buttons_group.addWidget(self.btn_compare)
 
@@ -112,18 +108,6 @@ class AdvancedFinancialPredictorUI(QWidget):
         main_layout.addLayout(middle_panel)
 
         # Model selection and prediction panel
-        #model_panel = QHBoxLayout()
-        #self.label_model = QLabel("انتخاب مدل:")
-        #self.combo_model = QComboBox()
-        #models = ["Linear Regression", "Random Forest", "Decision Tree", 
-                # "Gradient Boosting", "SVR"]
-        #try:
-        #    import xgboost
-        #    models.append("XGBoost")
-        #except ImportError:
-        #    pass
-        #self.combo_model.addItems(models)
-        #
         model_panel = QHBoxLayout()
         self.btn_predict = QPushButton("شروع پیش‌بینی")
         self.btn_predict.setStyleSheet("background-color: #4CAF50;")
@@ -151,8 +135,6 @@ class AdvancedFinancialPredictorUI(QWidget):
 
         # Connect signals
         self.btn_load.clicked.connect(self.data_processor.load_csv)
-        self.btn_clean.clicked.connect(self.data_processor.clean_data)
-        self.btn_mine.clicked.connect(self.data_processor.mine_data)
         self.btn_scatter.clicked.connect(self.visualizer.show_scatter_plot)
         self.btn_compare.clicked.connect(self.visualizer.compare_columns)
         self.btn_predict.clicked.connect(self.predictor.train_and_predict)

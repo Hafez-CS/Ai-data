@@ -28,6 +28,11 @@ class DataProcessor:
                 self.parent.status_bar.showMessage("فایل با موفقیت بارگذاری شد!")
                 QMessageBox.information(self.parent, "موفقیت", "فایل با موفقیت بارگذاری شد!")
                 self.parent.visualizer.visualize_data()
+                
+                # خودکار کردن پاک‌سازی و داده‌کاوی بعد از بارگذاری
+                self.clean_data()
+                self.mine_data()
+                
             except Exception as e:
                 logging.error(f"خطا در بارگذاری فایل CSV: {str(e)}", exc_info=True)
                 self.parent.status_bar.showMessage(f"خطا در بارگذاری فایل: {str(e)}")
