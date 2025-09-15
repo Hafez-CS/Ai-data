@@ -11,6 +11,7 @@ import os
 from google import genai
 from google.genai import types
 import matplotlib.pyplot as plt
+import pandas as pd  
 
 try:
     import xgboost as xgb
@@ -33,13 +34,14 @@ class Predictor:
         self.client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         self.model = "gemini-2.5-pro"
 
-    def analyze_dataset_with_gemini(self, df, target_column):
-        """تحلیل دیتاست با Gemini API و پیشنهاد بهترین الگوریتم"""
+    def analyze_dataset_with_gemini(self, df):
+        """تحلیل دیتاست با Gemini API و پیشنهاد بهترین ستون هدف و الگوریتم"""
         try:
             # آماده‌سازی مشخصات دیتاست
             numeric_cols = df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
-            desc_stats = df[numeric_cols].describe().to_string()
-            corr_matrix = df[numeric_cols].corr().to_string()
+            all_cols = df.columns.tolist()
+            desc_stats = df.describe(include='all').to_string()
+            corr_matrix = df[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
             num_rows, num_cols = df.shape
             missing_values = df.isnull().sum().sum()
 
@@ -48,17 +50,18 @@ class Predictor:
             شما یک متخصص یادگیری ماشین هستید. من یک دیتاست با مشخصات زیر دارم:
             - تعداد ردیف‌ها: {num_rows}
             - تعداد ستون‌ها: {num_cols}
-            - ستون‌های عددی: {list(numeric_cols)}
-            - ستون هدف: {target_column}
+            - تمام ستون‌ها: {all_cols}
             - آمار توصیفی:
             {desc_stats}
-            - ماتریس همبستگی:
+            - ماتریس همبستگی (برای ستون‌های عددی):
             {corr_matrix}
             - تعداد مقادیر گمشده: {missing_values}
 
-            با توجه به این اطلاعات، بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
+            با توجه به این اطلاعات:
+            1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
+            2. بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
             Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
-            لطفاً فقط نام الگوریتم را به صورت دقیق (مثلاً 'Random Forest') و توضیح مختصری برای پیشنهاد خود ارائه دهید.
+            لطفاً فقط نام ستون هدف و نام الگوریتم را به صورت دقیق (مثلاً 'target_column: Sales' و 'model: Random Forest') و توضیح مختصری برای هر پیشنهاد ارائه دهید.
             """
 
             # تنظیم محتوا برای Gemini
@@ -85,47 +88,71 @@ class Predictor:
             ):
                 response_text += chunk.text
 
-            # استخراج نام الگوریتم از پاسخ
+            # استخراج نام ستون هدف و الگوریتم از پاسخ
+            recommended_target = None
             recommended_model = None
             available_models = ["Linear Regression", "Random Forest", "Decision Tree", 
                                "Gradient Boosting", "SVR"]
             if xgb:
                 available_models.append("XGBoost")
+            
+            # جستجوی ساده برای استخراج
+            lower_response = response_text.lower()
+            for col in numeric_cols:  # فقط ستون‌های عددی برای هدف
+                if col.lower() in lower_response and "target_column" in lower_response:
+                    recommended_target = col
+                    break
+            
             for model_name in available_models:
-                if model_name.lower() in response_text.lower():
+                if model_name.lower() in lower_response:
                     recommended_model = model_name
                     break
 
-            return recommended_model, response_text
+            return recommended_target, recommended_model, response_text
 
         except Exception as e:
             logging.error(f"خطا در تحلیل دیتاست با Gemini API: {str(e)}", exc_info=True)
-            return None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
+            return None, None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
 
     def train_and_predict(self):
-        if self.parent.df is None or not self.parent.combo_target.currentText():
-            QMessageBox.warning(self.parent, "هشدار", "لطفاً فایل CSV را بارگذاری کرده و ستون هدف را انتخاب کنید.")
+        if self.parent.df is None:
+            QMessageBox.warning(self.parent, "هشدار", "لطفاً فایل CSV را بارگذاری کنید.")
             self.parent.status_bar.showMessage("هیچ فایل یا ستون هدفی انتخاب نشده است.")
             return
 
         try:
-            target_column = self.parent.combo_target.currentText()
-            # بررسی نوع داده‌های عددی (شامل اعشاری)
-            if self.parent.df[target_column].dtype not in [np.float64, np.float32, np.int64, np.int32]:
-                logging.error("ستون هدف غیرعددی انتخاب شده است.")
-                QMessageBox.critical(self.parent, "خطا", "ستون هدف باید عددی (صحیح یا اعشاری) باشد.")
+            # تحلیل دیتاست با Gemini API برای انتخاب ستون هدف و مدل
+            recommended_target, recommended_model, recommendation_text = self.analyze_dataset_with_gemini(self.parent.df)
+            if not recommended_target or not recommended_model:
+                logging.error(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
+                QMessageBox.critical(self.parent, "خطا", 
+                                   f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد:\n{recommendation_text}")
+                self.parent.status_bar.showMessage("Gemini نتوانست پیشنهاد دهد.")
+                return
+
+            target_column = recommended_target
+
+            # نمایش توصیه Gemini
+            QMessageBox.information(self.parent, "توصیه Gemini", 
+                                  f"ستون هدف انتخاب‌شده: {target_column}\nمدل انتخاب‌شده: {recommended_model}\nتوضیحات: {recommendation_text}")
+            self.parent.status_bar.showMessage(f"پیش‌بینی با مدل {recommended_model} و ستون هدف {target_column} انجام شد.")
+
+            # پردازش تمام ستون‌ها (عددی و غیرعددی)
+            df_processed = pd.get_dummies(self.parent.df, drop_first=True)  # one-hot encoding برای ستون‌های غیرعددی
+            X = df_processed.drop(columns=[target_column])
+            y = df_processed[target_column]
+
+            # بررسی نوع داده‌های عددی برای هدف
+            if y.dtype not in [np.float64, np.float32, np.int64, np.int32]:
+                logging.error("ستون هدف پیشنهادی غیرعددی است.")
+                QMessageBox.critical(self.parent, "خطا", "ستون هدف پیشنهادی باید عددی باشد.")
                 self.parent.status_bar.showMessage("ستون هدف غیرعددی است.")
                 return
 
-            X = self.parent.df.drop(columns=[target_column])
-            y = self.parent.df[target_column]
-
-            # انتخاب ستون‌های عددی (شامل اعشاری)
-            X = X.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32])
             if X.empty:
-                logging.error("هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
-                QMessageBox.critical(self.parent, "خطا", "هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
-                self.parent.status_bar.showMessage("هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
+                logging.error("هیچ ستون برای ویژگی‌ها یافت نشد.")
+                QMessageBox.critical(self.parent, "خطا", "هیچ ستون برای ویژگی‌ها یافت نشد.")
+                self.parent.status_bar.showMessage("هیچ ستون برای ویژگی‌ها یافت نشد.")
                 return
 
             if len(X) < 2 or len(y) < 2:
@@ -134,7 +161,7 @@ class Predictor:
                 self.parent.status_bar.showMessage("داده‌های کافی نیست.")
                 return
 
-            X.fillna(X.mean(), inplace=True)
+            X.fillna(X.mean(numeric_only=True), inplace=True)  # پر کردن NaN برای عددی‌ها
             y.fillna(y.mean(), inplace=True)
 
             scaler = StandardScaler()
@@ -146,15 +173,6 @@ class Predictor:
                 logging.error("داده‌های آزمایشی کافی نیست.")
                 QMessageBox.critical(self.parent, "خطا", "داده‌های آزمایشی کافی نیست. لطفاً داده‌های بیشتری فراهم کنید.")
                 self.parent.status_bar.showMessage("داده‌های آزمایشی کافی نیست.")
-                return
-
-            # تحلیل دیتاست با Gemini API
-            recommended_model, recommendation_text = self.analyze_dataset_with_gemini(self.parent.df, target_column)
-            if not recommended_model:
-                logging.error(f"Gemini نتوانست الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
-                QMessageBox.critical(self.parent, "خطا", 
-                                   f"Gemini نتوانست الگوریتم مناسبی پیشنهاد دهد:\n{recommendation_text}")
-                self.parent.status_bar.showMessage("Gemini نتوانست الگوریتم پیشنهاد دهد.")
                 return
 
             # تعریف مدل‌ها
@@ -175,11 +193,6 @@ class Predictor:
                                    f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
                 self.parent.status_bar.showMessage(f"الگوریتم {recommended_model} در دسترس نیست.")
                 return
-
-            # نمایش توصیه Gemini
-            QMessageBox.information(self.parent, "توصیه Gemini", 
-                                  f"مدل انتخاب‌شده: {recommended_model}\nتوضیحات: {recommendation_text}")
-            self.parent.status_bar.showMessage(f"پیش‌بینی با مدل {recommended_model} انجام شد.")
 
             # آموزش و پیش‌بینی فقط با مدل پیشنهادی Gemini
             try:

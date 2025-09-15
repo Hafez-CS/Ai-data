@@ -39,3 +39,75 @@ Traceback (most recent call last):
   File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1685, in _validate_integer
     raise IndexError("single positional indexer is out-of-bounds")
 IndexError: single positional indexer is out-of-bounds
+2025-09-15 12:54:53,702 - ERROR - \u062e\u0637\u0627 \u062f\u0631 \u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0641\u0627\u06cc\u0644 CSV: 'AdvancedFinancialPredictorUI' object has no attribute 'combo_target'
+Traceback (most recent call last):
+  File "c:\Users\IraniaN\OneDrive\Desktop\Ai-data-2\data_processing.py", line 24, in load_csv
+    self.parent.combo_target.clear()
+    ^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'AdvancedFinancialPredictorUI' object has no attribute 'combo_target'
+2025-09-15 13:07:36,692 - ERROR - \u062e\u0637\u0627 \u062f\u0631 \u067e\u0627\u06a9\u200c\u0633\u0627\u0632\u06cc \u062f\u0627\u062f\u0647\u200c\u0647\u0627: single positional indexer is out-of-bounds
+Traceback (most recent call last):
+  File "c:\Users\IraniaN\OneDrive\Desktop\Ai-data-2\data_processing.py", line 50, in clean_data
+    df_cleaned[non_numeric_cols] = df_cleaned[non_numeric_cols].fillna(df_cleaned[non_numeric_cols].mode().iloc[0])
+                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1191, in __getitem__
+    return self._getitem_axis(maybe_callable, axis=axis)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1752, in _getitem_axis
+    self._validate_integer(key, axis)
+  File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1685, in _validate_integer
+    raise IndexError("single positional indexer is out-of-bounds")
+IndexError: single positional indexer is out-of-bounds
+2025-09-15 13:07:46,052 - ERROR - \u062e\u0637\u0627 \u062f\u0631 \u062a\u062d\u0644\u06cc\u0644 \u062f\u06cc\u062a\u0627\u0633\u062a \u0628\u0627 Gemini API: 403 Forbidden. {'message': '<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content="initial-scale=1, minimum-scale=1, width=device-width">\n  <title>Error 403 (Forbidden)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:0}@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:-5px}@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) 0}}@media only screen and (-webkit-min-device-pixel-ratio:2){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat;-webkit-background-size:100% 100%}}#logo{display:inline-block;height:54px;width:150px}\n  </style>\n  <a href=//www.google.com/><span id=logo aria-label=Google></span></a>\n  <p><b>403.</b> <ins>That’s an error.</ins>\n  <p>Your client does not have permission to get URL <code>/v1beta/models/gemini-2.5-pro:streamGenerateContent</code> from this server.  <ins>That’s all we know.</ins>\n', 'status': 'Forbidden'}
+Traceback (most recent call last):
+  File "c:\Users\IraniaN\OneDrive\Desktop\Ai-data-2\prediction.py", line 84, in analyze_dataset_with_gemini
+    for chunk in self.client.models.generate_content_stream(
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\google\genai\models.py", line 6717, in generate_content_stream
+    for chunk in response:
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\google\genai\models.py", line 5466, in _generate_content_stream
+    for response in self._api_client.request_streamed(
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\google\genai\_api_client.py", line 1306, in request_streamed
+    session_response = self._request(http_request, http_options, stream=True)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\google\genai\_api_client.py", line 1109, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\tenacity\__init__.py", line 477, in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\tenacity\__init__.py", line 378, in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\tenacity\__init__.py", line 420, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\tenacity\__init__.py", line 187, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\concurrent\futures\_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\concurrent\futures\_base.py", line 401, in __get_result
+    raise self._exception
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\tenacity\__init__.py", line 480, in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\google\genai\_api_client.py", line 1074, in _request_once
+    errors.APIError.raise_for_response(response)
+  File "C:\Users\IraniaN\AppData\Local\Programs\Python\Python311\Lib\site-packages\google\genai\errors.py", line 105, in raise_for_response
+    raise ClientError(status_code, response_json, response)
+google.genai.errors.ClientError: 403 Forbidden. {'message': '<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content="initial-scale=1, minimum-scale=1, width=device-width">\n  <title>Error 403 (Forbidden)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:0}@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:-5px}@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) 0}}@media only screen and (-webkit-min-device-pixel-ratio:2){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat;-webkit-background-size:100% 100%}}#logo{display:inline-block;height:54px;width:150px}\n  </style>\n  <a href=//www.google.com/><span id=logo aria-label=Google></span></a>\n  <p><b>403.</b> <ins>That’s an error.</ins>\n  <p>Your client does not have permission to get URL <code>/v1beta/models/gemini-2.5-pro:streamGenerateContent</code> from this server.  <ins>That’s all we know.</ins>\n', 'status': 'Forbidden'}
+2025-09-15 13:07:46,082 - ERROR - Gemini \u0646\u062a\u0648\u0627\u0646\u0633\u062a \u0633\u062a\u0648\u0646 \u0647\u062f\u0641 \u06cc\u0627 \u0627\u0644\u06af\u0648\u0631\u06cc\u062a\u0645 \u0645\u0646\u0627\u0633\u0628\u06cc \u067e\u06cc\u0634\u0646\u0647\u0627\u062f \u062f\u0647\u062f: \u062e\u0637\u0627 \u062f\u0631 \u062a\u062d\u0644\u06cc\u0644 \u062f\u06cc\u062a\u0627\u0633\u062a \u0628\u0627 Gemini API: 403 Forbidden. {'message': '<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content="initial-scale=1, minimum-scale=1, width=device-width">\n  <title>Error 403 (Forbidden)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:0}@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:-5px}@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) 0}}@media only screen and (-webkit-min-device-pixel-ratio:2){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat;-webkit-background-size:100% 100%}}#logo{display:inline-block;height:54px;width:150px}\n  </style>\n  <a href=//www.google.com/><span id=logo aria-label=Google></span></a>\n  <p><b>403.</b> <ins>That’s an error.</ins>\n  <p>Your client does not have permission to get URL <code>/v1beta/models/gemini-2.5-pro:streamGenerateContent</code> from this server.  <ins>That’s all we know.</ins>\n', 'status': 'Forbidden'}
+2025-09-15 17:42:15,001 - ERROR - \u062e\u0637\u0627 \u062f\u0631 \u067e\u0627\u06a9\u200c\u0633\u0627\u0632\u06cc \u062f\u0627\u062f\u0647\u200c\u0647\u0627: single positional indexer is out-of-bounds
+Traceback (most recent call last):
+  File "c:\Users\IraniaN\OneDrive\Desktop\Ai-data-2\data_processing.py", line 50, in clean_data
+    df_cleaned[non_numeric_cols] = df_cleaned[non_numeric_cols].fillna(df_cleaned[non_numeric_cols].mode().iloc[0])
+                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1191, in __getitem__
+    return self._getitem_axis(maybe_callable, axis=axis)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1752, in _getitem_axis
+    self._validate_integer(key, axis)
+  File "C:\Users\IraniaN\AppData\Roaming\Python\Python311\site-packages\pandas\core\indexing.py", line 1685, in _validate_integer
+    raise IndexError("single positional indexer is out-of-bounds")
+IndexError: single positional indexer is out-of-bounds

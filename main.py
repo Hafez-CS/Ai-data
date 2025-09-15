@@ -6,7 +6,7 @@ from ui import AdvancedFinancialPredictorUI
 # تنظیم لاگ‌گیری
 logging.basicConfig(
     filename='app_errors.log',  
-    filemode='a',  
+    filemode='a',   
     format='%(asctime)s - %(levelname)s - %(message)s',  
     level=logging.ERROR  
 )

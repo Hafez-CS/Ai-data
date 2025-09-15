@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, 
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QListWidget, QTableWidget, QScrollArea, QStatusBar, QFileDialog, 
     QMessageBox, QStyle
 )
@@ -74,15 +74,8 @@ class AdvancedFinancialPredictorUI(QWidget):
         self.btn_load = QPushButton("بارگذاری فایل CSV")
         self.btn_load.setIcon(self.style().standardIcon(QStyle.SP_FileDialogStart))
         file_group.addWidget(self.btn_load)
-        
-        target_group = QVBoxLayout()
-        self.label_target = QLabel("ستون هدف:")
-        self.combo_target = QComboBox()
-        target_group.addWidget(self.label_target)
-        target_group.addWidget(self.combo_target)
 
         top_panel.addLayout(file_group)
-        top_panel.addLayout(target_group)
         main_layout.addLayout(top_panel)
 
         # Middle panel for analysis controls

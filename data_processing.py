@@ -4,7 +4,7 @@ import logging
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from dialog import DataAnalysisDialog
 
-# تنظیم لاگ‌گیری (در صورت نیاز، می‌توان در main.py تنظیم کرد)
+# تنظیم لاگ‌گیری
 logging.basicConfig(
     filename='app_errors.log',
     filemode='a',
@@ -21,9 +21,7 @@ class DataProcessor:
         if file_path:
             try:
                 self.parent.df = pd.read_csv(file_path)
-                self.parent.combo_target.clear()
                 self.parent.list_compare.clear()
-                self.parent.combo_target.addItems(self.parent.df.columns.tolist())
                 self.parent.list_compare.addItems(self.parent.df.columns.tolist())
                 self.parent.status_bar.showMessage("فایل با موفقیت بارگذاری شد!")
                 QMessageBox.information(self.parent, "موفقیت", "فایل با موفقیت بارگذاری شد!")
@@ -47,10 +45,23 @@ class DataProcessor:
         try:
             df_cleaned = self.parent.df.copy()
             numeric_cols = df_cleaned.select_dtypes(include=np.number).columns
-            df_cleaned[numeric_cols] = df_cleaned[numeric_cols].fillna(df_cleaned[numeric_cols].mean())
             non_numeric_cols = df_cleaned.select_dtypes(exclude=np.number).columns
-            df_cleaned[non_numeric_cols] = df_cleaned[non_numeric_cols].fillna(df_cleaned[non_numeric_cols].mode().iloc[0])
 
+            # پر کردن مقادیر گمشده برای ستون‌های عددی
+            if not numeric_cols.empty:
+                df_cleaned[numeric_cols] = df_cleaned[numeric_cols].fillna(df_cleaned[numeric_cols].mean())
+            
+            # پر کردن مقادیر گمشده برای ستون‌های غیرعددی
+            if not non_numeric_cols.empty:
+                for col in non_numeric_cols:
+                    mode_value = df_cleaned[col].mode()
+                    if not mode_value.empty:  # بررسی اینکه مد وجود دارد
+                        df_cleaned[col] = df_cleaned[col].fillna(mode_value[0])
+                    else:
+                        df_cleaned[col] = df_cleaned[col].fillna('')  # در صورت نبود مد، با رشته خالی پر می‌کنیم
+
+            # حذف داده‌های پرت برای ستون‌های عددی
+            initial_rows = len(df_cleaned)
             for col in numeric_cols:
                 Q1 = df_cleaned[col].quantile(0.25)
                 Q3 = df_cleaned[col].quantile(0.75)
@@ -60,16 +71,14 @@ class DataProcessor:
                 df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
 
             self.parent.df = df_cleaned
-            self.parent.combo_target.clear()
             self.parent.list_compare.clear()
-            self.parent.combo_target.addItems(self.parent.df.columns.tolist())
             self.parent.list_compare.addItems(self.parent.df.columns.tolist())
 
             cleaning_report = (
-                f"تعداد ردیف‌های اولیه: {len(self.parent.df)}\n"
+                f"تعداد ردیف‌های اولیه: {initial_rows}\n"
                 f"تعداد ردیف‌های پس از پاک‌سازی: {len(df_cleaned)}\n"
-                f"مقادیر گمشده پرشده با میانگین (ستون‌های عددی) و مد (ستون‌های غیرعددی)\n"
-                f"داده‌های پرت حذف شدند (روش IQR)"
+                f"مقادیر گمشده پرشده با میانگین (ستون‌های عددی) و مد یا رشته خالی (ستون‌های غیرعددی)\n"
+                f"داده‌های پرت حذف شدند (روش IQR برای ستون‌های عددی)"
             )
             dialog = DataAnalysisDialog("گزارش پاک‌سازی داده‌ها", cleaning_report, self.parent)
             dialog.exec_()
@@ -87,9 +96,9 @@ class DataProcessor:
             return
 
         try:
-            desc_stats = self.parent.df.describe().to_string()
+            desc_stats = self.parent.df.describe(include='all').to_string()
             numeric_cols = self.parent.df.select_dtypes(include=np.number).columns
-            corr_matrix = self.parent.df[numeric_cols].corr().to_string()
+            corr_matrix = self.parent.df[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
             outlier_report = ""
             for col in numeric_cols:
                 Q1 = self.parent.df[col].quantile(0.25)
