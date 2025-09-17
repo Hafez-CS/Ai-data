@@ -19,6 +19,16 @@ from google import genai
 from google.genai import types
 import arabic_reshaper
 from bidi.algorithm import get_display
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Access the API key
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY not found in environment variables")
 
 try:
     import xgboost as xgb
@@ -177,15 +187,30 @@ class DataProcessor:
 class Predictor:
     def __init__(self, data_processor: DataProcessor):
         self.data_processor = data_processor
-        # تنظیم API Key برای Gemini
-        os.environ['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY', 'YOUR_API_KEY_HERE')  # جایگزین با کلید واقعی
+    
+        # گرفتن API Key از محیط یا استفاده از مقدار پیش‌فرض
+        api_key = os.getenv(
+            "GEMINI_API_KEY",
+            "AIzaSyCvuk7u11jDd-KJrRDCzKckxWcTL31ADdY"  # ⚠️ TODO: کلید واقعی را جایگزین کن
+        )
+    
         try:
-            self.client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY not found")
+    
+            # ساخت کلاینت Gemini
+            self.client = genai.Client(api_key=api_key)
             self.model = "gemini-2.5-pro"
-            logging.debug("اتصال به Gemini API با موفقیت برقرار شد.")
+            logging.info("✅ اتصال به Gemini API با موفقیت برقرار شد.")
+    
         except Exception as e:
-            logging.error(f"خطا در اتصال به Gemini API: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در اتصال به Gemini API: {str(e)}")
+            # اگر خطا رخ داد → fallback
+            logging.warning(
+                f"⚠️ خطا در اتصال به Gemini API: {str(e)}. استفاده از fallback."
+            )
+            self.client = None
+            self.model = None
+
 
     def analyze_dataset_with_gemini(self, df):
         logging.debug("شروع تحلیل دیتاست با Gemini API")
