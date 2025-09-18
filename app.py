@@ -19,16 +19,14 @@ from google import genai
 from google.genai import types
 import arabic_reshaper
 from bidi.algorithm import get_display
-from dotenv import load_dotenv
 import os
+import json
 
-# Load environment variables from .env file
-load_dotenv()
 
 # Access the API key
-api_key = os.getenv("GEMINI_API_KEY")
+api_key = "GEMINI_API_KEY" # کلید API خود را اینجا قرار دهید
 if not api_key:
-    raise ValueError("GEMINI_API_KEY not found in environment variables")
+    raise ValueError("GEMINI_API_KEY not found or is empty")
 
 try:
     import xgboost as xgb
@@ -187,30 +185,18 @@ class DataProcessor:
 class Predictor:
     def __init__(self, data_processor: DataProcessor):
         self.data_processor = data_processor
-    
-        # گرفتن API Key از محیط یا استفاده از مقدار پیش‌فرض
-        api_key = os.getenv(
-            "GEMINI_API_KEY",
-            "AIzaSyCvuk7u11jDd-KJrRDCzKckxWcTL31ADdY"  # ⚠️ TODO: کلید واقعی را جایگزین کن
-        )
-    
         try:
+            # حذف این خط
+            # api_key = os.getenv("GEMINI_API_KEY")
+            # و استفاده از متغیر سراسری api_key که در بالا تعریف شده
             if not api_key:
                 raise ValueError("GEMINI_API_KEY not found")
-    
-            # ساخت کلاینت Gemini
             self.client = genai.Client(api_key=api_key)
             self.model = "gemini-2.5-pro"
-            logging.info("✅ اتصال به Gemini API با موفقیت برقرار شد.")
-    
+            logging.debug("اتصال به Gemini API با موفقیت برقرار شد.")
         except Exception as e:
-            # اگر خطا رخ داد → fallback
-            logging.warning(
-                f"⚠️ خطا در اتصال به Gemini API: {str(e)}. استفاده از fallback."
-            )
-            self.client = None
-            self.model = None
-
+            logging.error(f"خطا در اتصال به Gemini API: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"خطا در اتصال به Gemini API: {str(e)}")
 
     def analyze_dataset_with_gemini(self, df):
         logging.debug("شروع تحلیل دیتاست با Gemini API")
@@ -302,6 +288,10 @@ class Predictor:
             logging.error(f"خطا در تحلیل دیتاست با Gemini API: {str(e)}", exc_info=True)
             return None, None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
 
+    import json # اضافه کردن این خط به ابتدای فایل
+
+# ... بقیه کد ...
+
     async def train_and_predict(self):
         if self.data_processor.df is None:
             logging.error("هیچ داده‌ای برای پیش‌بینی وجود ندارد.")
@@ -317,12 +307,10 @@ class Predictor:
             target_column = recommended_target
             logging.debug(f"ستون هدف: {target_column}, مدل: {recommended_model}")
 
-            # پردازش تمام ستون‌ها (عددی و غیرعددی)
             df_processed = pd.get_dummies(self.data_processor.df, drop_first=True)
             X = df_processed.drop(columns=[target_column])
             y = df_processed[target_column]
 
-            # بررسی نوع داده‌های عددی برای هدف
             if y.dtype not in [np.float64, np.float32, np.int64, np.int32]:
                 logging.error(f"ستون هدف {target_column} غیرعددی است.")
                 raise HTTPException(status_code=400, detail="ستون هدف پیشنهادی باید عددی باشد.")
@@ -335,7 +323,6 @@ class Predictor:
                 logging.error("داده‌های کافی برای آموزش مدل وجود ندارد.")
                 raise HTTPException(status_code=400, detail="داده‌های کافی برای آموزش مدل وجود ندارد.")
 
-            # حذف ستون‌های با واریانس صفر یا کاملاً NaN
             X = X.loc[:, X.var(numeric_only=True) > 0]
             X = X.loc[:, X.notna().any()]
             X.fillna(X.mean(numeric_only=True), inplace=True)
@@ -348,7 +335,6 @@ class Predictor:
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X)
 
-            # بررسی مقادیر نامعتبر در X_scaled
             if np.any(np.isnan(X_scaled)) or np.any(np.isinf(X_scaled)):
                 logging.error("داده‌های استانداردشده شامل مقادیر NaN یا بی‌نهایت هستند.")
                 raise HTTPException(status_code=400, detail="داده‌های استانداردشده شامل مقادیر نامعتبر (NaN یا بی‌نهایت) هستند.")
@@ -359,7 +345,6 @@ class Predictor:
                 logging.error("داده‌های آزمایشی کافی نیست.")
                 raise HTTPException(status_code=400, detail="داده‌های آزمایشی کافی نیست.")
 
-            # تعریف مدل‌ها
             models = {
                 "Linear Regression": LinearRegression(),
                 "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
@@ -370,59 +355,70 @@ class Predictor:
             if xgb:
                 models["XGBoost"] = xgb.XGBRegressor(random_state=42)
 
-            # بررسی معتبر بودن مدل پیشنهادی
             if recommended_model not in models:
                 logging.error(f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
                 raise HTTPException(status_code=400, detail=f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
 
-            # آموزش و پیش‌بینی
             try:
                 model = models[recommended_model]
                 model.fit(X_train, y_train)
                 y_pred = model.predict(X_test)
                 logging.debug(f"مدل {recommended_model} با موفقیت آموزش دید.")
 
-                # تولید داده‌های آینده‌نگرانه (فرضی)
-                future_indices = np.arange(len(y_test), len(y_test) + 5)
                 future_X = X_test[-5:]
                 future_pred = model.predict(future_X)
                 logging.debug("پیش‌بینی‌های آینده تولید شدند.")
 
-                # تولید نمودار خطی
+                # تولید و ذخیره نمودار
                 fig = plt.Figure(figsize=(14, 8))
                 ax = fig.add_subplot(111)
                 indices = np.arange(len(y_test))
-                
+
                 ax.plot(indices, y_test.values, color='blue', label=get_display(arabic_reshaper.reshape('مقادیر واقعی')), linewidth=2)
                 ax.plot(indices, y_pred, color='orange', label=get_display(arabic_reshaper.reshape('مقادیر پیش‌بینی‌شده')), linewidth=2)
-                ax.plot(future_indices, future_pred, color='green', linestyle='--', 
-                        label=get_display(arabic_reshaper.reshape('پیش‌بینی آینده')), linewidth=2)
-                
+                ax.plot(np.arange(len(y_test), len(y_test) + 5), future_pred, color='green', linestyle='--', 
+                         label=get_display(arabic_reshaper.reshape('پیش‌بینی آینده')), linewidth=2)
+
                 ax.set_xlabel(get_display(arabic_reshaper.reshape("اندیس داده‌ها")))
                 ax.set_ylabel(get_display(arabic_reshaper.reshape("مقادیر")))
                 ax.set_title(get_display(arabic_reshaper.reshape(f"پیش‌بینی {target_column} با مدل {recommended_model}")))
                 ax.legend()
                 ax.grid(True)
                 fig.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
-                
-                # ذخیره نمودار
+
                 canvas = FigureCanvas(fig)
                 buf = io.BytesIO()
                 canvas.print_png(buf)
                 buf.seek(0)
-                
+
                 filename = f"prediction_{target_column}.png"
                 with open(filename, "wb") as f:
                     f.write(buf.getvalue())
                 logging.debug(f"نمودار در {filename} ذخیره شد.")
 
                 logging.info(f"پیش‌بینی با مدل {recommended_model} برای ستون {target_column} با موفقیت انجام شد.")
-                return {
+
+                # **تغییرات اصلی: ذخیره داده‌ها در یک متغیر و سپس در فایل**
+                response_data = {
                     "message": f"پیش‌بینی با مدل {recommended_model} انجام شد.",
                     "target_column": target_column,
                     "gemini_recommendation": recommendation_text,
-                    "plot": f"/plot/{filename}"
+                    "plot_url": f"/plot/{filename}",
+                    "prediction_data": {
+                        "actual_values": y_test.tolist(),
+                        "predicted_values": y_pred.tolist(),
+                        "future_predictions": future_pred.tolist()
+                    }
                 }
+
+                # ذخیره دیکشنری به عنوان فایل JSON در یک فایل متنی
+                output_filename = f"prediction_data_{target_column}.json" # میتونید پسوند رو .txt هم بزارید
+                with open(output_filename, 'w', encoding='utf-8') as f:
+                    json.dump(response_data, f, ensure_ascii=False, indent=4)
+
+                logging.info(f"داده‌های پیش‌بینی در فایل {output_filename} ذخیره شدند.")
+
+                return JSONResponse(content=response_data)
 
             except Exception as e:
                 logging.error(f"خطا در آموزش مدل {recommended_model}: {str(e)}", exc_info=True)
