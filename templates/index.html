@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پیش‌بینی مالی پیشرفته</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            text-align: right;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .btn {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        .result, .error {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .result {
+            background-color: #e7f3fe;
+            border: 1px solid #b3d4fc;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+        img {
+            max-width: 100%;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>پیش‌بینی مالی پیشرفته</h1>
+        <div class="form-group">
+            <form id="upload-form" enctype="multipart/form-data">
+                <label for="file">فایل CSV یا Excel را انتخاب کنید:</label>
+                <input type="file" id="file" name="file" accept=".csv,.xlsx,.xls" required>
+                <button type="submit" class="btn">آپلود و پردازش</button>
+            </form>
+        </div>
+        <div class="form-group">
+            <button id="predict-btn" class="btn" disabled>انجام پیش‌بینی</button>
+        </div>
+        <div id="result" class="result" style="display: none;"></div>
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="plot" style="display: none;">
+            <img id="plot-img" src="" alt="نمودار پیش‌بینی">
+        </div>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('upload-form');
+        const predictBtn = document.getElementById('predict-btn');
+        const resultDiv = document.getElementById('result');
+        const errorDiv = document.getElementById('error');
+        const plotDiv = document.getElementById('plot');
+        const plotImg = document.getElementById('plot-img');
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            resultDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            plotDiv.style.display = 'none';
+
+            const formData = new FormData(uploadForm);
+            try {
+                const response = await fetch('/upload_file', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <h3>نتیجه آپلود فایل</h3>
+                        <p>${data.message}</p>
+                        <p>ستون‌ها: ${data.columns.join(', ')}</p>
+                        <p>گزارش پاک‌سازی: ${data.cleaning_report.message}</p>
+                        <p>ردیف‌های اولیه: ${data.cleaning_report.initial_rows}</p>
+                        <p>ردیف‌های پس از پاک‌سازی: ${data.cleaning_report.cleaned_rows}</p>
+                    `;
+                    resultDiv.style.display = 'block';
+                    predictBtn.disabled = false;
+                } else {
+                    errorDiv.innerText = data.error;
+                    errorDiv.style.display = 'block';
+                }
+            } catch (err) {
+                errorDiv.innerText = 'خطا در ارتباط با سرور';
+                errorDiv.style.display = 'block';
+            }
+        });
+
+        predictBtn.addEventListener('click', async () => {
+            resultDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            plotDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <h3>نتیجه پیش‌بینی</h3>
+                        <p>${data.message}</p>
+                        <p>ستون هدف: ${data.target_column}</p>
+                        <p>توصیه Gemini: ${data.gemini_recommendation}</p>
+                        <p>مقادیر واقعی: ${data.prediction_data.actual_values.join(', ')}</p>
+                        <p>مقادیر پیش‌بینی‌شده: ${data.prediction_data.predicted_values.join(', ')}</p>
+                        <p>پیش‌بینی‌های آینده: ${data.prediction_data.future_predictions.join(', ')}</p>
+                    `;
+                    resultDiv.style.display = 'block';
+                    plotImg.src = data.plot_url;
+                    plotDiv.style.display = 'block';
+                } else {
+                    errorDiv.innerText = data.error;
+                    errorDiv.style.display = 'block';
+                }
+            } catch (err) {
+                errorDiv.innerText = 'خطا در ارتباط با سرور';
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
