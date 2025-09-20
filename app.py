@@ -24,7 +24,7 @@ import json
 
 
 # Access the API key
-api_key = "GEMINI_API_KEY" # کلید API خود را اینجا قرار دهید
+api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I" # کلید API خود را اینجا قرار دهید
 if not api_key:
     raise ValueError("GEMINI_API_KEY not found or is empty")
 
@@ -42,8 +42,8 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-# تنظیم فونت فارسی برای Matplotlib
-font_path = "path/to/Vazir.ttf"  # مسیر فونت Vazir را با مسیر واقعی جایگزین کنید
+
+font_path = "path/to/Vazir.ttf"  
 if os.path.exists(font_path):
     font_manager.fontManager.addfont(font_path)
     plt.rcParams["font.family"] = "Vazir"
