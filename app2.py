@@ -56,14 +56,14 @@ class DataProcessor:
     def __init__(self):
         self.df = None
 
-    def load_file(self, file):
-        logging.debug(f"بارگذاری فایل: {file.filename}")
+    def load_file(self, file, filename):  # اضافه کردن پارامتر filename
+        logging.debug(f"بارگذاری فایل: {filename}")
         try:
             # بررسی پسوند فایل و استفاده از تابع مناسب برای خواندن
-            if file.filename.endswith('.csv'):
+            if filename.endswith('.csv'):
                 self.df = pd.read_csv(file)
                 logging.debug("فایل CSV با موفقیت خوانده شد.")
-            elif file.filename.endswith(('.xlsx', '.xls')):
+            elif filename.endswith(('.xlsx', '.xls')):
                 self.df = pd.read_excel(file)
                 logging.debug("فایل Excel با موفقیت خوانده شد.")
             else:
@@ -81,7 +81,7 @@ class DataProcessor:
             logging.debug("شروع داده‌کاوی")
             mine_report = self.mine_data()
             
-            logging.info(f"فایل {file.filename} با موفقیت بارگذاری و پردازش شد.")
+            logging.info(f"فایل {filename} با موفقیت بارگذاری و پردازش شد.")
             return {
                 "message": "فایل با موفقیت بارگذاری شد!",
                 "columns": self.df.columns.tolist(),
@@ -89,7 +89,7 @@ class DataProcessor:
                 "mining_report": mine_report
             }
         except Exception as e:
-            logging.error(f"خطا در بارگذاری فایل {file.filename}: {str(e)}", exc_info=True)
+            logging.error(f"خطا در بارگذاری فایل {filename}: {str(e)}", exc_info=True)
             raise Exception(f"خطا در بارگذاری فایل: {str(e)}")
 
     def clean_data(self):
@@ -433,14 +433,8 @@ def upload_file():
             logging.error(f"فرمت فایل {file.filename} پشتیبانی نمی‌شود.")
             return jsonify({"error": "لطفاً یک فایل CSV یا Excel بارگذاری کنید."}), 400
         
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
+        response = data_processor.load_file(file, file.filename)  # ارسال شیء FileStorage و نام فایل
         
-        with open(file_path, 'rb') as f:
-            response = data_processor.load_file(f)
-        
-        os.remove(file_path)  # حذف فایل موقت
         return jsonify(response)
     except Exception as e:
         logging.error(f"خطا در آپلود فایل: {str(e)}", exc_info=True)
