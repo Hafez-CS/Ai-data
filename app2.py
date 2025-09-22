@@ -46,7 +46,7 @@ logging.basicConfig(
 DB_CONNECTION_STRING = (
     "DRIVER={ODBC Driver 17 for SQL Server};"
     "SERVER=localhost;"
-    "DATABASE=NewInventoryDB3;"
+    "DATABASE=AI;"
     "UID=sa;"
     "PWD=123;"
 )
@@ -258,21 +258,21 @@ class Predictor:
         except Exception as e:
             logging.error(f"خطا در اتصال به Gemini API: {str(e)}", exc_info=True)
             raise Exception(f"خطا در اتصال به Gemini API: {str(e)}")
-
+    
     def analyze_dataset_with_gemini(self, df, target_column=None):
         logging.debug("شروع تحلیل دیتاست با Gemini API")
         try:
             sample_size = min(100, len(df))
             df_sample = df.sample(n=sample_size, random_state=42) if len(df) > sample_size else df
             logging.debug(f"نمونه‌برداری انجام شد: {sample_size} ردیف")
-
+    
             numeric_cols = df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
             all_cols = df.columns.tolist()
             desc_stats = df_sample.describe(include='all').to_string()
             corr_matrix = df_sample[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
             num_rows, num_cols = df.shape
             missing_values = df.isnull().sum().sum()
-
+    
             if target_column:
                 prompt = f"""
                 شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
@@ -285,7 +285,7 @@ class Predictor:
                 {corr_matrix}
                 - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
                 - ستون هدف انتخاب‌شده: {target_column}
-
+    
                 با توجه به این اطلاعات و ستون هدف انتخاب‌شده ({target_column}):
                 بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
                 Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
@@ -302,14 +302,14 @@ class Predictor:
                 - ماتریس همبستگی (برای ستون‌های عددی نمونه):
                 {corr_matrix}
                 - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
-
+    
                 با توجه به این اطلاعات:
                 1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
                 2. بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
                 Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
                 لطفاً فقط نام ستون هدف و نام الگوریتم را به صورت دقیق (مثلاً 'target_column: Sales' و 'model: Random Forest') و توضیح مختصری برای هر پیشنهاد ارائه دهید.
                 """
-
+    
             contents = [
                 types.Content(
                     role="user",
@@ -319,7 +319,7 @@ class Predictor:
             generate_content_config = types.GenerateContentConfig(
                 thinking_config=types.ThinkingConfig(thinking_budget=-1),
             )
-
+    
             response_text = ""
             for chunk in self.client.models.generate_content_stream(
                 model=self.model,
@@ -328,31 +328,39 @@ class Predictor:
             ):
                 response_text += chunk.text
             logging.debug("پاسخ Gemini دریافت شد.")
-
+    
             recommended_target = target_column
             recommended_model = None
             available_models = ["Linear Regression", "Random Forest", "Decision Tree",
                                "Gradient Boosting", "SVR"]
             if xgb:
                 available_models.append("XGBoost")
-
-            lower_response = response_text.lower()
+    
+            # نرمال‌سازی پاسخ برای تطبیق بدون حساسیت به حروف و حذف فاصله‌های اضافی
+            lower_response = response_text.lower().strip()
             for model_name in available_models:
-                if model_name.lower() in lower_response:
+                if model_name.lower().strip() in lower_response:
                     recommended_model = model_name
                     break
-
+    
+            # استخراج ستون هدف در صورت عدم ارائه
+            if not recommended_target:
+                for col in all_cols:
+                    if f"target_column: {col}".lower() in lower_response:
+                        recommended_target = col
+                        break
+    
             if recommended_target and recommended_model:
                 logging.info(f"Gemini ستون هدف {recommended_target} و مدل {recommended_model} را پیشنهاد داد.")
                 return recommended_target, recommended_model, response_text
             else:
-                logging.error("Gemini نتوانست مدل مناسبی پیشنهاد دهد.")
+                logging.error("Gemini نتوانست مدل یا ستون هدف مناسبی پیشنهاد دهد.")
                 return None, None, response_text
-
+    
         except Exception as e:
             logging.error(f"خطا در تحلیل دیتاست با Gemini API: {str(e)}", exc_info=True)
             return None, None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
-
+    
     def train_and_predict(self, chat_id, target_column=None):
         if self.data_processor.df is None:
             self.data_processor.load_file_from_db(chat_id)
@@ -361,53 +369,85 @@ class Predictor:
             recommended_target, recommended_model, recommendation_text = self.analyze_dataset_with_gemini(self.data_processor.df, target_column)
             if not recommended_target or not recommended_model:
                 logging.error(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
+                cursor = conn.cursor()  # تعریف cursor در اینجا
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
-
+    
             target_column = recommended_target
             logging.debug(f"ستون هدف: {target_column}, مدل: {recommended_model}")
-
+    
             df_processed = pd.get_dummies(self.data_processor.df, drop_first=True)
             if target_column not in df_processed.columns:
                 logging.error(f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception(f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
-
+    
             X = df_processed.drop(columns=[target_column])
             y = df_processed[target_column]
-
+    
             if y.dtype not in [np.float64, np.float32, np.int64, np.int32]:
                 logging.error(f"ستون هدف {target_column} غیرعددی است.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception("ستون هدف پیشنهادی باید عددی باشد.")
-
+    
             if X.empty:
                 logging.error("هیچ ستون برای ویژگی‌ها یافت نشد.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception("هیچ ستون برای ویژگی‌ها یافت نشد.")
-
+    
             if len(X) < 2 or len(y) < 2:
                 logging.error("داده‌های کافی برای آموزش مدل وجود ندارد.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception("داده‌های کافی برای آموزش مدل وجود ندارد.")
-
+    
             X = X.loc[:, X.var(numeric_only=True) > 0]
             X = X.loc[:, X.notna().any()]
             X.fillna(X.mean(numeric_only=True), inplace=True)
             y.fillna(y.mean(), inplace=True)
-
+    
             if X.empty or len(X.columns) == 0:
                 logging.error("پس از حذف ستون‌های نامعتبر، هیچ ویژگی برای آموزش باقی نماند.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception("هیچ ویژگی معتبری برای آموزش مدل باقی نماند.")
-
+    
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X)
-
+    
             if np.any(np.isnan(X_scaled)) or np.any(np.isinf(X_scaled)):
                 logging.error("داده‌های استانداردشده شامل مقادیر NaN یا بی‌نهایت هستند.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception("داده‌های استانداردشده شامل مقادیر نامعتبر (NaN یا بی‌نهایت) هستند.")
-
+    
             X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-
+    
             if len(X_test) == 0 or len(y_test) == 0:
                 logging.error("داده‌های آزمایشی کافی نیست.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception("داده‌های آزمایشی کافی نیست.")
-
+    
             models = {
                 "Linear Regression": LinearRegression(),
                 "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
@@ -417,44 +457,48 @@ class Predictor:
             }
             if xgb:
                 models["XGBoost"] = xgb.XGBRegressor(random_state=42)
-
+    
             if recommended_model not in models:
                 logging.error(f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 raise Exception(f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
-
+    
             try:
                 model = models[recommended_model]
                 model.fit(X_train, y_train)
                 y_pred = model.predict(X_test)
                 logging.debug(f"مدل {recommended_model} با موفقیت آموزش دید.")
-
+    
                 future_X = X_test[-5:]
                 future_pred = model.predict(future_X)
                 logging.debug("پیش‌بینی‌های آینده تولید شدند.")
-
+    
                 fig = plt.Figure(figsize=(14, 8))
                 ax = fig.add_subplot(111)
                 indices = np.arange(len(y_test))
-
+    
                 ax.plot(indices, y_test.values, color='blue', label=get_display(arabic_reshaper.reshape('مقادیر واقعی')), linewidth=2)
                 ax.plot(indices, y_pred, color='orange', label=get_display(arabic_reshaper.reshape('مقادیر پیش‌بینی‌شده')), linewidth=2)
                 ax.plot(np.arange(len(y_test), len(y_test) + 5), future_pred, color='green', linestyle='--',
                         label=get_display(arabic_reshaper.reshape('پیش‌بینی آینده')), linewidth=2)
-
+    
                 ax.set_xlabel(get_display(arabic_reshaper.reshape("اندیس داده‌ها")))
                 ax.set_ylabel(get_display(arabic_reshaper.reshape("مقادیر")))
                 ax.set_title(get_display(arabic_reshaper.reshape(f"پیش‌بینی {target_column} با مدل {recommended_model}")))
                 ax.legend()
                 ax.grid(True)
                 fig.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
-
+    
                 canvas = FigureCanvas(fig)
                 buf = io.BytesIO()
                 canvas.print_png(buf)
                 buf.seek(0)
                 plot_data_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
                 logging.debug("نمودار به صورت base64 کدگذاری شد.")
-
+    
                 response_data = {
                     "message": f"پیش‌بینی با مدل {recommended_model} انجام شد.",
                     "target_column": target_column,
@@ -469,7 +513,7 @@ class Predictor:
                     "chat_id": chat_id,
                     "ai_id": int(self.data_processor.ai_id)
                 }
-
+    
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -481,18 +525,20 @@ class Predictor:
                 )
                 conn.commit()
                 logging.debug(f"نتایج پیش‌بینی برای chat_id {chat_id} و ai_id {self.data_processor.ai_id} در جدول dbo.result_table ذخیره شد.")
-
+    
                 logging.info(f"پیش‌بینی با مدل {recommended_model} برای ستون {target_column} با موفقیت انجام شد.")
                 return response_data
-
+    
             except Exception as e:
+                cursor = conn.cursor()
                 cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
                                (chat_id, self.data_processor.ai_id))
                 conn.commit()
                 logging.error(f"خطا در آموزش مدل {recommended_model}: {str(e)}", exc_info=True)
                 raise Exception(f"خطا در آموزش مدل {recommended_model}: {str(e)}")
-
+    
         except Exception as e:
+            cursor = conn.cursor()
             cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
                            (chat_id, self.data_processor.ai_id))
             conn.commit()
