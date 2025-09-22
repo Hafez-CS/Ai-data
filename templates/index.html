@@ -3,143 +3,204 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>پیش‌بینی مالی پیشرفته</title>
+    <title>سیستم پیش‌بینی داده‌ها</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            text-align: right;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .btn {
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        .btn:hover {
-            background-color: #0056b3;
-        }
-        .result, .error {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 5px;
-        }
-        .result {
-            background-color: #e7f3fe;
-            border: 1px solid #b3d4fc;
-        }
-        .error {
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-        }
-        img {
-            max-width: 100%;
-            margin-top: 20px;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; text-align: right; }
+        h1, h2 { color: #333; }
+        .form-container, .results-container { background-color: #fff; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); }
+        .form-container input, .form-container select, .form-container button { margin: 10px 0; padding: 10px; width: 100%; max-width: 400px; }
+        .form-container button { background-color: #28a745; color: white; border: none; cursor: pointer; }
+        .form-container button:hover { background-color: #218838; }
+        .error { color: red; margin-top: 10px; }
+        .success { color: green; margin-top: 10px; }
+        .results-container img { max-width: 100%; margin-top: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        table, th, td { border: 1px solid #ddd; }
+        th, td { padding: 10px; text-align: center; }
+        th { background-color: #f2f2f2; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>پیش‌بینی مالی پیشرفته</h1>
-        <div class="form-group">
-            <form id="upload-form" enctype="multipart/form-data">
-                <label for="file">فایل CSV یا Excel را انتخاب کنید:</label>
-                <input type="file" id="file" name="file" accept=".csv,.xlsx,.xls" required>
-                <button type="submit" class="btn">آپلود و پردازش</button>
-            </form>
-        </div>
-        <div class="form-group">
-            <button id="predict-btn" class="btn" disabled>انجام پیش‌بینی</button>
-        </div>
-        <div id="result" class="result" style="display: none;"></div>
-        <div id="error" class="error" style="display: none;"></div>
-        <div id="plot" style="display: none;">
-            <img id="plot-img" src="" alt="نمودار پیش‌بینی">
-        </div>
+    <h1>سیستم پیش‌بینی داده‌ها</h1>
+
+    <div class="form-container">
+        <h2>آپلود فایل</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="number" id="chatId" name="chat_id" placeholder="شناسه چت (chat_id)" required>
+            <input type="file" id="fileInput" name="file" accept=".csv,.xlsx,.xls" required>
+            <button type="submit">آپلود فایل</button>
+        </form>
+        <div id="uploadMessage"></div>
+    </div>
+
+    <div class="form-container" id="predictFormContainer" style="display: none;">
+        <h2>پیش‌بینی اولیه (با پیشنهاد Gemini)</h2>
+        <form id="predictForm">
+            <input type="number" id="predictChatId" name="chat_id" placeholder="شناسه چت (chat_id)" required>
+            <button type="submit">اجرای پیش‌بینی اولیه</button>
+        </form>
+        <div id="predictMessage"></div>
+    </div>
+
+    <div class="form-container" id="targetFormContainer" style="display: none;">
+        <h2>پیش‌بینی با ستون هدف انتخاب‌شده</h2>
+        <form id="targetForm">
+            <input type="number" id="targetChatId" name="chat_id" placeholder="شناسه چت (chat_id)" required>
+            <select id="targetColumn" name="target_column" required>
+                <option value="">یک ستون هدف انتخاب کنید</option>
+            </select>
+            <button type="submit">اجرای پیش‌بینی</button>
+        </form>
+        <div id="targetMessage"></div>
+    </div>
+
+    <div class="results-container" id="resultsContainer" style="display: none;">
+        <h2>نتایج پیش‌بینی</h2>
+        <input type="number" id="resultsChatId" placeholder="شناسه چت برای نمایش نتایج" required>
+        <button onclick="fetchResults()">بازیابی نتایج</button>
+        <div id="resultsMessage"></div>
+        <div id="results"></div>
     </div>
 
     <script>
-        const uploadForm = document.getElementById('upload-form');
-        const predictBtn = document.getElementById('predict-btn');
-        const resultDiv = document.getElementById('result');
-        const errorDiv = document.getElementById('error');
-        const plotDiv = document.getElementById('plot');
-        const plotImg = document.getElementById('plot-img');
+        const API_BASE_URL = 'http://localhost:8000';
 
-        uploadForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            resultDiv.style.display = 'none';
-            errorDiv.style.display = 'none';
-            plotDiv.style.display = 'none';
-
-            const formData = new FormData(uploadForm);
+        async function handleFetch(url, options) {
+            console.log(`ارسال درخواست به: ${url}`, options);
             try {
-                const response = await fetch('/upload_file', {
+                const response = await fetch(url, { ...options, timeout: 60000 });
+                const data = await response.json();
+                console.log(`پاسخ از ${url}:`, data);
+                return { response, data };
+            } catch (error) {
+                console.error(`خطا در درخواست به ${url}:`, error);
+                throw error;
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('chat_id', document.getElementById('chatId').value);
+            formData.append('file', document.getElementById('fileInput').files[0]);
+
+            try {
+                const { response, data } = await handleFetch(`${API_BASE_URL}/upload_file`, {
                     method: 'POST',
                     body: formData
                 });
-                const data = await response.json();
+
                 if (response.ok) {
-                    resultDiv.innerHTML = `
-                        <h3>نتیجه آپلود فایل</h3>
-                        <p>${data.message}</p>
-                        <p>ستون‌ها: ${data.columns.join(', ')}</p>
-                        <p>گزارش پاک‌سازی: ${data.cleaning_report.message}</p>
-                        <p>ردیف‌های اولیه: ${data.cleaning_report.initial_rows}</p>
-                        <p>ردیف‌های پس از پاک‌سازی: ${data.cleaning_report.cleaned_rows}</p>
-                    `;
-                    resultDiv.style.display = 'block';
-                    predictBtn.disabled = false;
+                    document.getElementById('uploadMessage').innerHTML = `<p class="success">${data.message}</p>`;
+                    const targetSelect = document.getElementById('targetColumn');
+                    targetSelect.innerHTML = '<option value="">یک ستون هدف انتخاب کنید</option>';
+                    data.columns.forEach(column => {
+                        const option = document.createElement('option');
+                        option.value = column;
+                        option.textContent = column;
+                        targetSelect.appendChild(option);
+                    });
+                    document.getElementById('predictFormContainer').style.display = 'block';
+                    document.getElementById('targetFormContainer').style.display = 'block';
+                    document.getElementById('resultsContainer').style.display = 'block';
+                    document.getElementById('predictChatId').value = data.chat_id;
+                    document.getElementById('targetChatId').value = data.chat_id;
+                    document.getElementById('resultsChatId').value = data.chat_id;
                 } else {
-                    errorDiv.innerText = data.error;
-                    errorDiv.style.display = 'block';
+                    document.getElementById('uploadMessage').innerHTML = `<p class="error">خطا: ${data.error}</p>`;
                 }
-            } catch (err) {
-                errorDiv.innerText = 'خطا در ارتباط با سرور';
-                errorDiv.style.display = 'block';
+            } catch (error) {
+                document.getElementById('uploadMessage').innerHTML = `<p class="error">خطا در ارتباط با سرور: ${error.message}</p>`;
             }
         });
 
-        predictBtn.addEventListener('click', async () => {
-            resultDiv.style.display = 'none';
-            errorDiv.style.display = 'none';
-            plotDiv.style.display = 'none';
+        document.getElementById('predictForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('chat_id', document.getElementById('predictChatId').value);
 
             try {
-                const response = await fetch('/predict', {
-                    method: 'POST'
+                const { response, data } = await handleFetch(`${API_BASE_URL}/predict`, {
+                    method: 'POST',
+                    body: formData
                 });
-                const data = await response.json();
+
                 if (response.ok) {
-                    resultDiv.innerHTML = `
-                        <h3>نتیجه پیش‌بینی</h3>
-                        <p>${data.message}</p>
-                        <p>ستون هدف: ${data.target_column}</p>
-                        <p>توصیه Gemini: ${data.gemini_recommendation}</p>
-                        <p>مقادیر واقعی: ${data.prediction_data.actual_values.join(', ')}</p>
-                        <p>مقادیر پیش‌بینی‌شده: ${data.prediction_data.predicted_values.join(', ')}</p>
-                        <p>پیش‌بینی‌های آینده: ${data.prediction_data.future_predictions.join(', ')}</p>
-                    `;
-                    resultDiv.style.display = 'block';
-                    plotImg.src = data.plot_url;
-                    plotDiv.style.display = 'block';
+                    document.getElementById('predictMessage').innerHTML = `<p class="success">${data.message}</p>`;
+                    fetchResults();
                 } else {
-                    errorDiv.innerText = data.error;
-                    errorDiv.style.display = 'block';
+                    document.getElementById('predictMessage').innerHTML = `<p class="error">خطا: ${data.error}</p>`;
                 }
-            } catch (err) {
-                errorDiv.innerText = 'خطا در ارتباط با سرور';
-                errorDiv.style.display = 'block';
+            } catch (error) {
+                document.getElementById('predictMessage').innerHTML = `<p class="error">خطا در ارتباط با سرور: ${error.message}</p>`;
             }
         });
+
+        document.getElementById('targetForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('chat_id', document.getElementById('targetChatId').value);
+            formData.append('target_column', document.getElementById('targetColumn').value);
+
+            try {
+                const { response, data } = await handleFetch(`${API_BASE_URL}/predict_with_target`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    document.getElementById('targetMessage').innerHTML = `<p class="success">${data.message}</p>`;
+                    fetchResults();
+                } else {
+                    document.getElementById('targetMessage').innerHTML = `<p class="error">خطا: ${data.error}</p>`;
+                }
+            } catch (error) {
+                document.getElementById('targetMessage').innerHTML = `<p class="error">خطا در ارتباط با سرور: ${error.message}</p>`;
+            }
+        });
+
+        async function fetchResults() {
+            const chatId = document.getElementById('resultsChatId').value;
+            try {
+                const { response, data } = await handleFetch(`${API_BASE_URL}/get_results/${chatId}`, {
+                    method: 'GET'
+                });
+
+                if (response.ok) {
+                    const resultsDiv = document.getElementById('results');
+                    resultsDiv.innerHTML = '';
+                    data.results.forEach(result => {
+                        const resultDiv = document.createElement('div');
+                        resultDiv.innerHTML = `
+                            <h3>پیش‌بینی برای ستون ${result.target_column} با مدل ${result.model_used}</h3>
+                            <p>${result.message}</p>
+                            <p>توصیه Gemini: ${result.gemini_recommendation}</p>
+                            <img src="${result.plot_data}" alt="نمودار پیش‌بینی">
+                            <table>
+                                <tr>
+                                    <th>مقادیر واقعی</th>
+                                    <th>مقادیر پیش‌بینی‌شده</th>
+                                    <th>پیش‌بینی‌های آینده</th>
+                                </tr>
+                                ${result.prediction_data.actual_values.map((val, i) => `
+                                    <tr>
+                                        <td>${val}</td>
+                                        <td>${result.prediction_data.predicted_values[i] || '-'}</td>
+                                        <td>${i < result.prediction_data.future_predictions.length ? result.prediction_data.future_predictions[i] : '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </table>
+                        `;
+                        resultsDiv.appendChild(resultDiv);
+                    });
+                    document.getElementById('resultsMessage').innerHTML = `<p class="success">نتایج با موفقیت بازیابی شدند.</p>`;
+                } else {
+                    document.getElementById('resultsMessage').innerHTML = `<p class="error">خطا: ${data.error}</p>`;
+                }
+            } catch (error) {
+                document.getElementById('resultsMessage').innerHTML = `<p class="error">خطا در ارتباط با سرور: ${error.message}</p>`;
+            }
+        }
     </script>
 </body>
 </html>

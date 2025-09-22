@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import io
-import os
+import base64
 from typing import Optional
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -13,16 +13,18 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
-from flask import Flask, request, jsonify, send_file, render_template
-from werkzeug.utils import secure_filename
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 from google import genai
 from google.genai import types
 import arabic_reshaper
 from bidi.algorithm import get_display
 import json
+import pyodbc
+import os
 
 # Access the API key
-api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I"  # کلید API خود را اینجا قرار دهید
+api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I"  # Replace with your actual API key
 if not api_key:
     raise ValueError("GEMINI_API_KEY not found or is empty")
 
@@ -32,7 +34,7 @@ except ImportError:
     xgb = None
     logging.warning("کتابخانه xgboost نصب نشده است. XGBoost در دسترس نخواهد بود.")
 
-# تنظیم لاگ‌گیری با جزئیات بیشتر
+# Setup logging
 logging.basicConfig(
     filename='app_errors.log',
     filemode='a',
@@ -40,7 +42,22 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-font_path = "path/to/Vazir.ttf"  
+# Database connection setup
+DB_CONNECTION_STRING = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=localhost;"
+    "DATABASE=NewInventoryDB3;"
+    "UID=sa;"
+    "PWD=123;"
+)
+try:
+    conn = pyodbc.connect(DB_CONNECTION_STRING)
+    logging.debug("اتصال به پایگاه داده با موفقیت برقرار شد.")
+except Exception as e:
+    logging.error(f"خطا در اتصال به پایگاه داده: {str(e)}", exc_info=True)
+    raise Exception(f"خطا در اتصال به پایگاه داده: {str(e)}")
+
+font_path = "C:/path/to/Vazir.ttf"  # مسیر فونت را به‌روزرسانی کنید
 if os.path.exists(font_path):
     font_manager.fontManager.addfont(font_path)
     plt.rcParams["font.family"] = "Vazir"
@@ -49,17 +66,34 @@ else:
     plt.rcParams["font.family"] = "sans-serif"
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = './uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+CORS(app)
 
 class DataProcessor:
     def __init__(self):
         self.df = None
+        self.ai_id = None
 
-    def load_file(self, file, filename):  # اضافه کردن پارامتر filename
-        logging.debug(f"بارگذاری فایل: {filename}")
+    def load_file(self, file, filename, chat_id):
+        logging.debug(f"بارگذاری فایل: {filename} برای chat_id: {chat_id}")
         try:
-            # بررسی پسوند فایل و استفاده از تابع مناسب برای خواندن
+            file_content = file.read()
+            file_content_b64 = base64.b64encode(file_content).decode('utf-8')
+            file_type = 'csv' if filename.endswith('.csv') else 'excel'
+            logging.debug("محتوای فایل به صورت base64 کدگذاری شد.")
+
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO dbo.ai (file_path, chat_id, filename, file_type, status)
+                VALUES (?, ?, ?, ?, 'processed')
+                """,
+                (file_content_b64, chat_id, filename, file_type)
+            )
+            conn.commit()
+            self.ai_id = cursor.execute("SELECT @@IDENTITY").fetchone()[0]
+            logging.debug(f"محتوای فایل در جدول dbo.ai با ai_id {self.ai_id} ذخیره شد.")
+
+            file.seek(0)
             if filename.endswith('.csv'):
                 self.df = pd.read_csv(file)
                 logging.debug("فایل CSV با موفقیت خوانده شد.")
@@ -69,28 +103,64 @@ class DataProcessor:
             else:
                 logging.error("فرمت فایل پشتیبانی نمی‌شود.")
                 raise ValueError("فرمت فایل پشتیبانی نمی‌شود. فقط فایل‌های CSV و Excel مجاز هستند.")
-            
-            # بررسی اولیه داده‌ها
+
             if self.df.empty:
                 logging.error("فایل بارگذاری‌شده خالی است.")
                 raise ValueError("فایل بارگذاری‌شده خالی است.")
-            
-            # اجرای خودکار پاک‌سازی و داده‌کاوی
+
             logging.debug("شروع پاک‌سازی داده‌ها")
             clean_report = self.clean_data()
             logging.debug("شروع داده‌کاوی")
             mine_report = self.mine_data()
-            
+
             logging.info(f"فایل {filename} با موفقیت بارگذاری و پردازش شد.")
             return {
                 "message": "فایل با موفقیت بارگذاری شد!",
-                "columns": self.df.columns.tolist(),
+                "columns": self.df.select_dtypes(include=[np.number]).columns.tolist(),
                 "cleaning_report": clean_report,
-                "mining_report": mine_report
+                "mining_report": mine_report,
+                "chat_id": chat_id,
+                "ai_id": int(self.ai_id)
             }
         except Exception as e:
+            if self.ai_id:
+                cursor.execute("UPDATE dbo.ai SET status = 'failed' WHERE id = ?", (self.ai_id,))
+                conn.commit()
             logging.error(f"خطا در بارگذاری فایل {filename}: {str(e)}", exc_info=True)
             raise Exception(f"خطا در بارگذاری فایل: {str(e)}")
+
+    def load_file_from_db(self, chat_id):
+        logging.debug(f"بازیابی فایل برای chat_id: {chat_id}")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, file_path, file_type FROM dbo.ai WHERE chat_id = ? AND status = 'processed' ORDER BY created_at DESC", (chat_id,))
+            result = cursor.fetchone()
+            if not result:
+                logging.error(f"هیچ فایل پردازش‌شده‌ای برای chat_id {chat_id} یافت نشد.")
+                raise ValueError(f"هیچ فایل پردازش‌شده‌ای برای chat_id {chat_id} یافت نشد.")
+
+            self.ai_id, file_content_b64, file_type = result
+            file_content = base64.b64decode(file_content_b64)
+            file_like = io.BytesIO(file_content)
+
+            if file_type == 'csv':
+                self.df = pd.read_csv(file_like)
+                logging.debug("فایل CSV از پایگاه داده خوانده شد.")
+            elif file_type == 'excel':
+                self.df = pd.read_excel(file_like)
+                logging.debug("فایل Excel از پایگاه داده خوانده شد.")
+            else:
+                logging.error("فرمت فایل پشتیبانی نمی‌شود.")
+                raise ValueError("فرمت فایل پشتیبانی نمی‌شود.")
+
+            if self.df.empty:
+                logging.error("فایل بارگذاری‌شده از پایگاه داده خالی است.")
+                raise ValueError("فایل بارگذاری‌شده از پایگاه داده خالی است.")
+
+            return self.df
+        except Exception as e:
+            logging.error(f"خطا در بازیابی فایل برای chat_id {chat_id}: {str(e)}", exc_info=True)
+            raise Exception(f"خطا در بازیابی فایل: {str(e)}")
 
     def clean_data(self):
         if self.df is None:
@@ -99,22 +169,19 @@ class DataProcessor:
         try:
             df_cleaned = self.df.copy()
             logging.debug(f"شروع پاک‌سازی داده‌ها با {len(df_cleaned)} ردیف و {len(df_cleaned.columns)} ستون")
-            
-            # حذف ستون‌های کاملاً NaN
+
             df_cleaned = df_cleaned.dropna(axis=1, how='all')
             logging.debug(f"پس از حذف ستون‌های کاملاً NaN: {len(df_cleaned.columns)} ستون باقی ماند")
-            
+
             numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
             non_numeric_cols = df_cleaned.select_dtypes(exclude=[np.number]).columns
             logging.debug(f"ستون‌های عددی: {numeric_cols.tolist()}")
             logging.debug(f"ستون‌های غیرعددی: {non_numeric_cols.tolist()}")
 
-            # پر کردن مقادیر گمشده برای ستون‌های عددی
             if not numeric_cols.empty:
                 df_cleaned[numeric_cols] = df_cleaned[numeric_cols].fillna(df_cleaned[numeric_cols].mean())
                 logging.debug("مقادیر گمشده ستون‌های عددی با میانگین پر شدند.")
-            
-            # پر کردن مقادیر گمشده برای ستون‌های غیرعددی
+
             if not non_numeric_cols.empty:
                 for col in non_numeric_cols:
                     mode_value = df_cleaned[col].mode()
@@ -124,10 +191,9 @@ class DataProcessor:
                         df_cleaned[col] = df_cleaned[col].fillna('')
                 logging.debug("مقادیر گمشده ستون‌های غیرعددی با مد یا رشته خالی پر شدند.")
 
-            # حذف داده‌های پرت برای ستون‌های عددی
             initial_rows = len(df_cleaned)
             for col in numeric_cols:
-                if df_cleaned[col].var() > 0:  # فقط ستون‌هایی با واریانس غیرصفر
+                if df_cleaned[col].var() > 0:
                     Q1 = df_cleaned[col].quantile(0.25)
                     Q3 = df_cleaned[col].quantile(0.75)
                     IQR = Q3 - Q1
@@ -138,7 +204,6 @@ class DataProcessor:
                 else:
                     logging.debug(f"ستون {col} واریانس صفر دارد و از حذف پرت‌ها صرف‌نظر شد.")
 
-            # بررسی اینکه داده‌های کافی باقی مانده‌اند
             if len(df_cleaned) < 2 or df_cleaned[numeric_cols].dropna().empty:
                 logging.error("پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
                 raise Exception("پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
@@ -194,7 +259,7 @@ class Predictor:
             logging.error(f"خطا در اتصال به Gemini API: {str(e)}", exc_info=True)
             raise Exception(f"خطا در اتصال به Gemini API: {str(e)}")
 
-    def analyze_dataset_with_gemini(self, df):
+    def analyze_dataset_with_gemini(self, df, target_column=None):
         logging.debug("شروع تحلیل دیتاست با Gemini API")
         try:
             sample_size = min(100, len(df))
@@ -208,36 +273,51 @@ class Predictor:
             num_rows, num_cols = df.shape
             missing_values = df.isnull().sum().sum()
 
-            prompt = f"""
-            شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
-            - تعداد ردیف‌های کل دیتاست: {num_rows}
-            - تعداد ستون‌ها: {num_cols}
-            - تمام ستون‌ها: {all_cols}
-            - آمار توصیفی (بر اساس نمونه):
-            {desc_stats}
-            - ماتریس همبستگی (برای ستون‌های عددی نمونه):
-            {corr_matrix}
-            - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
+            if target_column:
+                prompt = f"""
+                شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
+                - تعداد ردیف‌های کل دیتاست: {num_rows}
+                - تعداد ستون‌ها: {num_cols}
+                - تمام ستون‌ها: {all_cols}
+                - آمار توصیفی (بر اساس نمونه):
+                {desc_stats}
+                - ماتریس همبستگی (برای ستون‌های عددی نمونه):
+                {corr_matrix}
+                - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
+                - ستون هدف انتخاب‌شده: {target_column}
 
-            با توجه به این اطلاعات:
-            1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
-            2. بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
-            Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
-            لطفاً فقط نام ستون هدف و نام الگوریتم را به صورت دقیق (مثلاً 'target_column: Sales' و 'model: Random Forest') و توضیح مختصری برای هر پیشنهاد ارائه دهید.
-            """
+                با توجه به این اطلاعات و ستون هدف انتخاب‌شده ({target_column}):
+                بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
+                Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
+                لطفاً نام الگوریتم را به صورت دقیق (مثلاً 'model: Random Forest') و توضیح مختصری برای پیشنهاد ارائه دهید.
+                """
+            else:
+                prompt = f"""
+                شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
+                - تعداد ردیف‌های کل دیتاست: {num_rows}
+                - تعداد ستون‌ها: {num_cols}
+                - تمام ستون‌ها: {all_cols}
+                - آمار توصیفی (بر اساس نمونه):
+                {desc_stats}
+                - ماتریس همبستگی (برای ستون‌های عددی نمونه):
+                {corr_matrix}
+                - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
+
+                با توجه به این اطلاعات:
+                1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
+                2. بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
+                Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
+                لطفاً فقط نام ستون هدف و نام الگوریتم را به صورت دقیق (مثلاً 'target_column: Sales' و 'model: Random Forest') و توضیح مختصری برای هر پیشنهاد ارائه دهید.
+                """
 
             contents = [
                 types.Content(
                     role="user",
-                    parts=[
-                        types.Part.from_text(text=prompt),
-                    ],
+                    parts=[types.Part.from_text(text=prompt)],
                 ),
             ]
             generate_content_config = types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(
-                    thinking_budget=-1,
-                ),
+                thinking_config=types.ThinkingConfig(thinking_budget=-1),
             )
 
             response_text = ""
@@ -249,19 +329,14 @@ class Predictor:
                 response_text += chunk.text
             logging.debug("پاسخ Gemini دریافت شد.")
 
-            recommended_target = None
+            recommended_target = target_column
             recommended_model = None
-            available_models = ["Linear Regression", "Random Forest", "Decision Tree", 
+            available_models = ["Linear Regression", "Random Forest", "Decision Tree",
                                "Gradient Boosting", "SVR"]
             if xgb:
                 available_models.append("XGBoost")
-            
+
             lower_response = response_text.lower()
-            for col in numeric_cols:
-                if col.lower() in lower_response and "target_column" in lower_response:
-                    recommended_target = col
-                    break
-            
             for model_name in available_models:
                 if model_name.lower() in lower_response:
                     recommended_model = model_name
@@ -271,20 +346,19 @@ class Predictor:
                 logging.info(f"Gemini ستون هدف {recommended_target} و مدل {recommended_model} را پیشنهاد داد.")
                 return recommended_target, recommended_model, response_text
             else:
-                logging.error("Gemini نتوانست ستون هدف یا مدل مناسبی پیشنهاد دهد.")
+                logging.error("Gemini نتوانست مدل مناسبی پیشنهاد دهد.")
                 return None, None, response_text
 
         except Exception as e:
             logging.error(f"خطا در تحلیل دیتاست با Gemini API: {str(e)}", exc_info=True)
             return None, None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
 
-    def train_and_predict(self):
+    def train_and_predict(self, chat_id, target_column=None):
         if self.data_processor.df is None:
-            logging.error("هیچ داده‌ای برای پیش‌بینی وجود ندارد.")
-            raise Exception("لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
+            self.data_processor.load_file_from_db(chat_id)
         try:
             logging.debug("شروع فرآیند پیش‌بینی")
-            recommended_target, recommended_model, recommendation_text = self.analyze_dataset_with_gemini(self.data_processor.df)
+            recommended_target, recommended_model, recommendation_text = self.analyze_dataset_with_gemini(self.data_processor.df, target_column)
             if not recommended_target or not recommended_model:
                 logging.error(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
                 raise Exception(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
@@ -293,6 +367,10 @@ class Predictor:
             logging.debug(f"ستون هدف: {target_column}, مدل: {recommended_model}")
 
             df_processed = pd.get_dummies(self.data_processor.df, drop_first=True)
+            if target_column not in df_processed.columns:
+                logging.error(f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
+                raise Exception(f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
+
             X = df_processed.drop(columns=[target_column])
             y = df_processed[target_column]
 
@@ -360,8 +438,8 @@ class Predictor:
 
                 ax.plot(indices, y_test.values, color='blue', label=get_display(arabic_reshaper.reshape('مقادیر واقعی')), linewidth=2)
                 ax.plot(indices, y_pred, color='orange', label=get_display(arabic_reshaper.reshape('مقادیر پیش‌بینی‌شده')), linewidth=2)
-                ax.plot(np.arange(len(y_test), len(y_test) + 5), future_pred, color='green', linestyle='--', 
-                         label=get_display(arabic_reshaper.reshape('پیش‌بینی آینده')), linewidth=2)
+                ax.plot(np.arange(len(y_test), len(y_test) + 5), future_pred, color='green', linestyle='--',
+                        label=get_display(arabic_reshaper.reshape('پیش‌بینی آینده')), linewidth=2)
 
                 ax.set_xlabel(get_display(arabic_reshaper.reshape("اندیس داده‌ها")))
                 ax.set_ylabel(get_display(arabic_reshaper.reshape("مقادیر")))
@@ -374,39 +452,50 @@ class Predictor:
                 buf = io.BytesIO()
                 canvas.print_png(buf)
                 buf.seek(0)
-
-                filename = f"prediction_{target_column}.png"
-                with open(filename, "wb") as f:
-                    f.write(buf.getvalue())
-                logging.debug(f"نمودار در {filename} ذخیره شد.")
-
-                logging.info(f"پیش‌بینی با مدل {recommended_model} برای ستون {target_column} با موفقیت انجام شد.")
+                plot_data_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+                logging.debug("نمودار به صورت base64 کدگذاری شد.")
 
                 response_data = {
                     "message": f"پیش‌بینی با مدل {recommended_model} انجام شد.",
                     "target_column": target_column,
+                    "model_used": recommended_model,
                     "gemini_recommendation": recommendation_text,
-                    "plot_url": f"/plot/{filename}",
+                    "plot_data": f"data:image/png;base64,{plot_data_b64}",
                     "prediction_data": {
                         "actual_values": y_test.tolist(),
                         "predicted_values": y_pred.tolist(),
                         "future_predictions": future_pred.tolist()
-                    }
+                    },
+                    "chat_id": chat_id,
+                    "ai_id": int(self.data_processor.ai_id)
                 }
 
-                output_filename = f"prediction_data_{target_column}.json"
-                with open(output_filename, 'w', encoding='utf-8') as f:
-                    json.dump(response_data, f, ensure_ascii=False, indent=4)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.result_table (chat_id, ai_id, result_json, model_used, target_column, plot_data, status)
+                    VALUES (?, ?, ?, ?, ?, ?, 'completed')
+                    """,
+                    (chat_id, self.data_processor.ai_id, json.dumps(response_data, ensure_ascii=False),
+                     recommended_model, target_column, plot_data_b64)
+                )
+                conn.commit()
+                logging.debug(f"نتایج پیش‌بینی برای chat_id {chat_id} و ai_id {self.data_processor.ai_id} در جدول dbo.result_table ذخیره شد.")
 
-                logging.info(f"داده‌های پیش‌بینی در فایل {output_filename} ذخیره شدند.")
-
+                logging.info(f"پیش‌بینی با مدل {recommended_model} برای ستون {target_column} با موفقیت انجام شد.")
                 return response_data
 
             except Exception as e:
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
                 logging.error(f"خطا در آموزش مدل {recommended_model}: {str(e)}", exc_info=True)
                 raise Exception(f"خطا در آموزش مدل {recommended_model}: {str(e)}")
 
         except Exception as e:
+            cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                           (chat_id, self.data_processor.ai_id))
+            conn.commit()
             logging.error(f"خطا در فرآیند پیش‌بینی: {str(e)}", exc_info=True)
             raise Exception(f"خطا در فرآیند پیش‌بینی: {str(e)}")
 
@@ -420,21 +509,27 @@ def index():
 @app.route('/upload_file', methods=['POST'])
 def upload_file():
     try:
-        if 'file' not in request.files:
-            logging.error("هیچ فایلی در درخواست آپلود نشده است.")
-            return jsonify({"error": "لطفاً یک فایل انتخاب کنید."}), 400
-        
+        if 'file' not in request.files or 'chat_id' not in request.form:
+            logging.error("فایل یا chat_id در درخواست وجود ندارد.")
+            return jsonify({"error": "لطفاً فایل و chat_id را وارد کنید."}), 400
+
         file = request.files['file']
+        chat_id = request.form['chat_id']
         if file.filename == '':
             logging.error("هیچ فایلی انتخاب نشده است.")
             return jsonify({"error": "لطفاً یک فایل انتخاب کنید."}), 400
-        
+
         if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
             logging.error(f"فرمت فایل {file.filename} پشتیبانی نمی‌شود.")
             return jsonify({"error": "لطفاً یک فایل CSV یا Excel بارگذاری کنید."}), 400
-        
-        response = data_processor.load_file(file, file.filename)  # ارسال شیء FileStorage و نام فایل
-        
+
+        try:
+            chat_id = int(chat_id)
+        except ValueError:
+            logging.error(f"chat_id نامعتبر: {chat_id}")
+            return jsonify({"error": "chat_id باید یک عدد صحیح باشد."}), 400
+
+        response = data_processor.load_file(file, file.filename, chat_id)
         return jsonify(response)
     except Exception as e:
         logging.error(f"خطا در آپلود فایل: {str(e)}", exc_info=True)
@@ -443,21 +538,68 @@ def upload_file():
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        response_data = predictor.train_and_predict()
+        if 'chat_id' not in request.form:
+            logging.error("chat_id در درخواست وجود ندارد.")
+            return jsonify({"error": "لطفاً chat_id را وارد کنید."}), 400
+
+        chat_id = request.form['chat_id']
+        try:
+            chat_id = int(chat_id)
+        except ValueError:
+            logging.error(f"chat_id نامعتبر: {chat_id}")
+            return jsonify({"error": "chat_id باید یک عدد صحیح باشد."}), 400
+
+        response_data = predictor.train_and_predict(chat_id)
         return jsonify(response_data)
     except Exception as e:
         logging.error(f"خطا در پیش‌بینی: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/plot/<filename>')
-def get_plot(filename):
+@app.route('/predict_with_target', methods=['POST'])
+def predict_with_target():
     try:
-        if not os.path.exists(filename):
-            logging.error(f"نمودار {filename} یافت نشد.")
-            return jsonify({"error": "نمودار یافت نشد."}), 404
-        return send_file(filename, mimetype='image/png')
+        if 'chat_id' not in request.form or 'target_column' not in request.form:
+            logging.error("chat_id یا target_column در درخواست وجود ندارد.")
+            return jsonify({"error": "لطفاً chat_id و target_column را وارد کنید."}), 400
+
+        chat_id = request.form['chat_id']
+        target_column = request.form['target_column']
+        try:
+            chat_id = int(chat_id)
+        except ValueError:
+            logging.error(f"chat_id نامعتبر: {chat_id}")
+            return jsonify({"error": "chat_id باید یک عدد صحیح باشد."}), 400
+
+        data_processor.load_file_from_db(chat_id)
+        if target_column not in data_processor.df.columns:
+            logging.error(f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
+            return jsonify({"error": f"ستون هدف {target_column} در داده‌ها وجود ندارد."}), 400
+
+        if data_processor.df[target_column].dtype not in [np.float64, np.float32, np.int64, np.int32]:
+            logging.error(f"ستون هدف {target_column} غیرعددی است.")
+            return jsonify({"error": "ستون هدف باید عددی باشد."}), 400
+
+        response_data = predictor.train_and_predict(chat_id, target_column)
+        return jsonify(response_data)
     except Exception as e:
-        logging.error(f"خطا در ارسال نمودار {filename}: {str(e)}", exc_info=True)
+        logging.error(f"خطا در پیش‌بینی با ستون هدف انتخاب‌شده: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/get_results/<int:chat_id>', methods=['GET'])
+def get_results(chat_id):
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT result_json FROM dbo.result_table WHERE chat_id = ?", (chat_id,))
+        results = cursor.fetchall()
+        if not results:
+            logging.error(f"هیچ نتیجه‌ای برای chat_id {chat_id} یافت نشد.")
+            return jsonify({"error": f"هیچ نتیجه‌ای برای chat_id {chat_id} یافت نشد."}), 404
+
+        result_list = [json.loads(row[0]) for row in results]
+        logging.debug(f"نتایج برای chat_id {chat_id} بازیابی شدند.")
+        return jsonify({"chat_id": chat_id, "results": result_list})
+    except Exception as e:
+        logging.error(f"خطا در بازیابی نتایج برای chat_id {chat_id}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
