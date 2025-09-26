@@ -14,7 +14,7 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 from fastapi import FastAPI, UploadFile, Form, HTTPException, Depends
-from fastapi.middleware.cors import CORS
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
@@ -24,6 +24,18 @@ import json
 import pyodbc
 import os
 from uuid import uuid4
+
+app = FastAPI()
+
+# فعال‌سازی CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # یا ['http://localhost:3000'] اگر فقط فرانت خاصی دارید
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Access the API key
 api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I"  # Replace with your actual API key
@@ -67,14 +79,7 @@ else:
     logging.warning("فونت Vazir یافت نشد. از فونت پیش‌فرض استفاده می‌شود.")
     plt.rcParams["font.family"] = "sans-serif"
 
-app = FastAPI()
-app.add_middleware(
-    CORS,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 class DataProcessor:
     def __init__(self):
