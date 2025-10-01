@@ -13,6 +13,8 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 from fastapi import FastAPI, UploadFile, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -23,6 +25,7 @@ from bidi.algorithm import get_display
 import json
 import pyodbc
 import os
+import re
 from uuid import uuid4
 
 app = FastAPI()
@@ -30,12 +33,11 @@ app = FastAPI()
 # فعال‌سازی CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # یا ['http://localhost:3000'] اگر فقط فرانت خاصی دارید
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # Access the API key
 api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I"  # Replace with your actual API key
@@ -67,6 +69,12 @@ DB_CONNECTION_STRING = (
 try:
     conn = pyodbc.connect(DB_CONNECTION_STRING)
     logging.debug("اتصال به پایگاه داده با موفقیت برقرار شد.")
+    cursor = conn.cursor()
+    cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name = N'status' AND Object_ID = Object_ID(N'dbo.result_table'))
+        ALTER TABLE dbo.result_table ADD status VARCHAR(50)
+    """)
+    conn.commit()
 except Exception as e:
     logging.error(f"خطا در اتصال به پایگاه داده: {str(e)}", exc_info=True)
     raise Exception(f"خطا در اتصال به پایگاه داده: {str(e)}")
@@ -78,8 +86,6 @@ if os.path.exists(font_path):
 else:
     logging.warning("فونت Vazir یافت نشد. از فونت پیش‌فرض استفاده می‌شود.")
     plt.rcParams["font.family"] = "sans-serif"
-
-
 
 class DataProcessor:
     def __init__(self):
@@ -121,6 +127,9 @@ class DataProcessor:
                 logging.error("فایل بارگذاری‌شده خالی است.")
                 raise ValueError("فایل بارگذاری‌شده خالی است.")
 
+            numeric_cols = self.df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
+            logging.debug(f"ستون‌های عددی اولیه: {numeric_cols.tolist()}")
+
             logging.debug("شروع پاک‌سازی داده‌ها")
             clean_report = self.clean_data()
             logging.debug("شروع داده‌کاوی")
@@ -129,7 +138,7 @@ class DataProcessor:
             logging.info(f"فایل {filename} با موفقیت بارگذاری و پردازش شد.")
             return {
                 "message": "فایل با موفقیت بارگذاری شد!",
-                "columns": self.df.select_dtypes(include=[np.number]).columns.tolist(),
+                "numeric_columns": self.df.select_dtypes(include=[np.number]).columns.tolist(),
                 "cleaning_report": clean_report,
                 "mining_report": mine_report,
                 "chat_id": chat_id,
@@ -170,6 +179,9 @@ class DataProcessor:
                 logging.error("فایل بارگذاری‌شده از پایگاه داده خالی است.")
                 raise HTTPException(status_code=400, detail="فایل بارگذاری‌شده از پایگاه داده خالی است.")
 
+            numeric_cols = self.df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
+            logging.debug(f"ستون‌های عددی پس از بارگذاری: {numeric_cols.tolist()}")
+
             return self.df
         except Exception as e:
             logging.error(f"خطا در بازیابی فایل برای chat_id {chat_id}: {str(e)}", exc_info=True)
@@ -183,8 +195,12 @@ class DataProcessor:
             df_cleaned = self.df.copy()
             logging.debug(f"شروع پاک‌سازی داده‌ها با {len(df_cleaned)} ردیف و {len(df_cleaned.columns)} ستون")
 
+            columns_before = df_cleaned.columns.tolist()
             df_cleaned = df_cleaned.dropna(axis=1, how='all')
-            logging.debug(f"پس از حذف ستون‌های کاملاً NaN: {len(df_cleaned.columns)} ستون باقی ماند")
+            columns_after = df_cleaned.columns.tolist()
+            dropped_columns = set(columns_before) - set(columns_after)
+            if dropped_columns:
+                logging.debug(f"ستون‌های حذف‌شده (کاملاً خالی): {dropped_columns}")
 
             numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
             non_numeric_cols = df_cleaned.select_dtypes(exclude=[np.number]).columns
@@ -192,8 +208,9 @@ class DataProcessor:
             logging.debug(f"ستون‌های غیرعددی: {non_numeric_cols.tolist()}")
 
             if not numeric_cols.empty:
-                df_cleaned[numeric_cols] = df_cleaned[numeric_cols].fillna(df_cleaned[numeric_cols].mean())
-                logging.debug("مقادیر گمشده ستون‌های عددی با میانگین پر شدند.")
+                imputer = KNNImputer(n_neighbors=5)
+                df_cleaned[numeric_cols] = pd.DataFrame(imputer.fit_transform(df_cleaned[numeric_cols]), columns=numeric_cols)
+                logging.debug("مقادیر گمشده ستون‌های عددی با KNN Imputer پر شدند.")
 
             if not non_numeric_cols.empty:
                 for col in non_numeric_cols:
@@ -202,20 +219,32 @@ class DataProcessor:
                         df_cleaned[col] = df_cleaned[col].fillna(mode_value[0])
                     else:
                         df_cleaned[col] = df_cleaned[col].fillna('')
-                logging.debug("مقادیر گمشده ستون‌های غیرعددی با مد یا رشته خالی پر شدند.")
+                    logging.debug(f"مقادیر گمشده ستون غیرعددی {col} با مد یا رشته خالی پر شدند.")
+
+            for col in non_numeric_cols:
+                try:
+                    df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce')
+                    if not df_cleaned[col].isna().all():
+                        numeric_cols = numeric_cols.append(pd.Index([col]))
+                        logging.debug(f"ستون {col} به نوع عددی تبدیل شد.")
+                except:
+                    logging.debug(f"ستون {col} قابل تبدیل به عدد نیست و به صورت غیرعددی باقی می‌ماند.")
 
             initial_rows = len(df_cleaned)
             for col in numeric_cols:
-                if df_cleaned[col].var() > 0:
+                if col in df_cleaned.columns and df_cleaned[col].var() > 0:
                     Q1 = df_cleaned[col].quantile(0.25)
                     Q3 = df_cleaned[col].quantile(0.75)
                     IQR = Q3 - Q1
+                    if np.isnan(IQR) or np.isinf(IQR):
+                        logging.debug(f"IQR برای ستون {col} نامعتبر است، از حذف پرت‌ها صرف‌نظر شد.")
+                        continue
                     lower_bound = Q1 - 1.5 * IQR
                     upper_bound = Q3 + 1.5 * IQR
                     df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
                     logging.debug(f"داده‌های پرت برای ستون {col} حذف شدند.")
                 else:
-                    logging.debug(f"ستون {col} واریانس صفر دارد و از حذف پرت‌ها صرف‌نظر شد.")
+                    logging.debug(f"ستون {col} واریانس صفر دارد یا وجود ندارد و از حذف پرت‌ها صرف‌نظر شد.")
 
             if len(df_cleaned) < 2 or df_cleaned[numeric_cols].dropna().empty:
                 logging.error("پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
@@ -226,7 +255,10 @@ class DataProcessor:
             return {
                 "initial_rows": initial_rows,
                 "cleaned_rows": len(df_cleaned),
-                "message": "مقادیر گمشده پرشده با میانگین (ستون‌های عددی) و مد یا رشته خالی (ستون‌های غیرعددی). داده‌های پرت حذف شدند (روش IQR)."
+                "numeric_columns": numeric_cols.tolist(),
+                "non_numeric_columns": non_numeric_cols.tolist(),
+                "dropped_columns": list(dropped_columns),
+                "message": "مقادیر گمشده با KNN Imputer (ستون‌های عددی) و مد یا رشته خالی (ستون‌های غیرعددی) پر شدند. داده‌های پرت حذف شدند (روش IQR)."
             }
         except Exception as e:
             logging.error(f"خطا در پاک‌سازی داده‌ها: {str(e)}", exc_info=True)
@@ -237,18 +269,37 @@ class DataProcessor:
             logging.error("هیچ داده‌ای برای داده‌کاوی وجود ندارد.")
             raise HTTPException(status_code=400, detail="لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
         try:
-            desc_stats = self.df.describe(include='all').to_dict()
+            desc_stats = self.df.describe(include='all')
+            desc_stats = desc_stats.replace([np.inf, -np.inf], np.nan).fillna(0).to_dict()
+            logging.debug("آمار توصیفی محاسبه و مقادیر نامعتبر جایگزین شدند.")
+
             numeric_cols = self.df.select_dtypes(include=[np.number]).columns
-            corr_matrix = self.df[numeric_cols].corr().to_dict() if not numeric_cols.empty else {}
+            if not numeric_cols.empty:
+                corr_matrix = self.df[numeric_cols].corr()
+                corr_matrix = corr_matrix.replace([np.inf, -np.inf], np.nan).fillna(0).to_dict()
+                logging.debug("ماتریس همبستگی محاسبه و مقادیر نامعتبر جایگزین شدند.")
+            else:
+                corr_matrix = {}
+                logging.debug("هیچ ستون عددی برای محاسبه ماتریس همبستگی وجود ندارد.")
+
             outlier_report = {}
             for col in numeric_cols:
-                Q1 = self.df[col].quantile(0.25)
-                Q3 = self.df[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - 1.5 * IQR
-                upper_bound = Q3 + 1.5 * IQR
-                outliers = self.df[(self.df[col] < lower_bound) | (self.df[col] > upper_bound)][col]
-                outlier_report[col] = len(outliers)
+                if self.df[col].var() > 0:
+                    Q1 = self.df[col].quantile(0.25)
+                    Q3 = self.df[col].quantile(0.75)
+                    IQR = Q3 - Q1
+                    if np.isnan(IQR) or np.isinf(IQR):
+                        outlier_report[col] = 0
+                        logging.debug(f"IQR برای ستون {col} نامعتبر است، تعداد پرت‌ها صفر در نظر گرفته شد.")
+                        continue
+                    lower_bound = Q1 - 1.5 * IQR
+                    upper_bound = Q3 + 1.5 * IQR
+                    outliers = self.df[(self.df[col] < lower_bound) | (self.df[col] > upper_bound)][col]
+                    outlier_report[col] = len(outliers)
+                else:
+                    outlier_report[col] = 0
+                    logging.debug(f"ستون {col} واریانس صفر دارد، تعداد پرت‌ها صفر است.")
+
             logging.info("داده‌کاوی با موفقیت انجام شد.")
             return {
                 "descriptive_stats": desc_stats,
@@ -275,52 +326,62 @@ class Predictor:
     async def analyze_dataset_with_gemini(self, df, target_column=None):
         logging.debug("شروع تحلیل دیتاست با Gemini API")
         try:
-            sample_size = min(100, len(df))
+            sample_size = min(500, len(df))
             df_sample = df.sample(n=sample_size, random_state=42) if len(df) > sample_size else df
             logging.debug(f"نمونه‌برداری انجام شد: {sample_size} ردیف")
 
             numeric_cols = df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
             all_cols = df.columns.tolist()
-            desc_stats = df_sample.describe(include='all').to_string()
-            corr_matrix = df_sample[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
+            desc_stats = df_sample.describe(include='all').replace([np.inf, -np.inf], np.nan).fillna(0).to_string()
+            corr_matrix = df_sample[numeric_cols].corr().replace([np.inf, -np.inf], np.nan).fillna(0).to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
             num_rows, num_cols = df.shape
             missing_values = df.isnull().sum().sum()
 
             if target_column:
-                prompt = f"""
-                شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
-                - تعداد ردیف‌های کل دیتاست: {num_rows}
-                - تعداد ستون‌ها: {num_cols}
-                - تمام ستون‌ها: {all_cols}
-                - آمار توصیفی (بر اساس نمونه):
-                {desc_stats}
-                - ماتریس همبستگی (برای ستون‌های عددی نمونه):
-                {corr_matrix}
-                - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
-                - ستون هدف انتخاب‌شده: {target_column}
+                if target_column not in df.columns:
+                    logging.error(f"ستون هدف {target_column} در دیتاست وجود ندارد.")
+                    raise HTTPException(status_code=400, detail=f"ستون هدف {target_column} در دیتاست وجود ندارد.")
+                if df[target_column].dtype not in [np.float64, np.float32, np.int64, np.int32]:
+                    logging.error(f"ستون هدف {target_column} غیرعددی است.")
+                    raise HTTPException(status_code=400, detail=f"ستون هدف {target_column} باید عددی باشد.")
 
-                با توجه به این اطلاعات و ستون هدف انتخاب‌شده ({target_column}):
-                بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
-                Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
-                لطفاً نام الگوریتم را به صورت دقیق (مثلاً 'model: Random Forest') و توضیح مختصری برای پیشنهاد ارائه دهید.
+                prompt = f"""
+                You are a machine learning expert. I have a dataset sample with the following details (sample size: {sample_size} rows):
+                - Total rows in dataset: {num_rows}
+                - Number of columns: {num_cols}
+                - All columns: {all_cols}
+                - Numeric columns: {numeric_cols.tolist()}
+                - Descriptive statistics (based on sample):
+                {desc_stats}
+                - Correlation matrix (for numeric columns in sample):
+                {corr_matrix}
+                - Total missing values in dataset: {missing_values}
+                - Selected target column: {target_column}
+
+                Based on the dataset characteristics and the selected target column ({target_column}):
+                Recommend the best machine learning algorithm for regression from the following options:
+                Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (if available).
+                Provide the algorithm name in the format 'model: <model_name>' and a brief explanation for the recommendation.
                 """
             else:
                 prompt = f"""
-                شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
-                - تعداد ردیف‌های کل دیتاست: {num_rows}
-                - تعداد ستون‌ها: {num_cols}
-                - تمام ستون‌ها: {all_cols}
-                - آمار توصیفی (بر اساس نمونه):
+                You are a machine learning expert. I have a dataset sample with the following details (sample size: {sample_size} rows):
+                - Total rows in dataset: {num_rows}
+                - Number of columns: {num_cols}
+                - All columns: {all_cols}
+                - Numeric columns: {numeric_cols.tolist()}
+                - Descriptive statistics (based on sample):
                 {desc_stats}
-                - ماتریس همبستگی (برای ستون‌های عددی نمونه):
+                - Correlation matrix (for numeric columns in sample):
                 {corr_matrix}
-                - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
+                - Total missing values in dataset: {missing_values}
 
-                با توجه به این اطلاعات:
-                1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
-                2. بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
-                Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
-                لطفاً فقط نام ستون هدف و نام الگوریتم را به صورت دقیق (مثلاً 'target_column: Sales' و 'model: Random Forest') و توضیح مختصری برای هر پیشنهاد ارائه دهید.
+                Based on this information:
+                1. Recommend the best column to use as the target column for regression from the numeric columns: {numeric_cols.tolist()}.
+                The target column must be numeric and selected based on correlation, variance, or predictive importance.
+                2. Recommend the best machine learning algorithm for regression from the following options:
+                Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (if available).
+                Provide the target column and algorithm names in the format 'target_column: <column_name>' and 'model: <model_name>', along with a brief explanation for each recommendation.
                 """
 
             contents = [
@@ -334,13 +395,29 @@ class Predictor:
             )
 
             response_text = ""
-            for chunk in self.client.models.generate_content_stream(
-                model=self.model,
-                contents=contents,
-                config=generate_content_config,
-            ):
-                response_text += chunk.text
-            logging.debug("پاسخ Gemini دریافت شد.")
+            try:
+                for chunk in self.client.models.generate_content_stream(
+                    model=self.model,
+                    contents=contents,
+                    config=generate_content_config,
+                ):
+                    if chunk.text is not None:
+                        response_text += chunk.text
+                    else:
+                        logging.warning("تکه پاسخ Gemini None است، نادیده گرفته شد.")
+                        continue
+                logging.debug(f"پاسخ کامل Gemini: {response_text}")
+            except Exception as e:
+                logging.error(f"خطا در دریافت پاسخ از Gemini API: {str(e)}", exc_info=True)
+                recommended_target = target_column or next((col for col in df.columns if col in df.select_dtypes(include=[np.number]).columns), None)
+                recommended_model = "Linear Regression"
+                return recommended_target, recommended_model, f"خطا در دریافت پاسخ از Gemini API: {str(e)}. مقدار پیش‌فرض انتخاب شد."
+
+            if not response_text:
+                logging.error("پاسخ Gemini خالی است.")
+                recommended_target = target_column or next((col for col in df.columns if col in df.select_dtypes(include=[np.number]).columns), None)
+                recommended_model = "Linear Regression"
+                return recommended_target, recommended_model, "پاسخ Gemini خالی بود، اولین ستون عددی و Linear Regression به‌صورت پیش‌فرض انتخاب شدند."
 
             recommended_target = target_column
             recommended_model = None
@@ -349,28 +426,27 @@ class Predictor:
             if xgb:
                 available_models.append("XGBoost")
 
-            lower_response = response_text.lower().strip()
-            for model_name in available_models:
-                if model_name.lower().strip() in lower_response:
-                    recommended_model = model_name
-                    break
+            model_match = re.search(r"model: ([\w\s]+)", response_text, re.IGNORECASE)
+            recommended_model = model_match.group(1) if model_match and model_match.group(1) in available_models else None
 
-            if not recommended_target:
-                for col in all_cols:
-                    if f"target_column: {col}".lower() in lower_response:
-                        recommended_target = col
-                        break
+            if not recommended_model:
+                recommended_model = "Linear Regression"
+                logging.debug("مدل پیش‌فرض Linear Regression انتخاب شد.")
 
             if recommended_target and recommended_model:
                 logging.info(f"Gemini ستون هدف {recommended_target} و مدل {recommended_model} را پیشنهاد داد.")
                 return recommended_target, recommended_model, response_text
             else:
-                logging.error("Gemini نتوانست مدل یا ستون هدف مناسبی پیشنهاد دهد.")
-                return None, None, response_text
+                logging.error(f"Gemini نتوانست مدل مناسبی پیشنهاد دهد: {response_text}")
+                recommended_target = target_column or next((col for col in df.columns if col in df.select_dtypes(include=[np.number]).columns), None)
+                recommended_model = "Linear Regression"
+                return recommended_target, recommended_model, f"Gemini نتوانست مدل پیشنهاد دهد: {response_text}. Linear Regression انتخاب شد."
 
         except Exception as e:
             logging.error(f"خطا در تحلیل دیتاست با Gemini API: {str(e)}", exc_info=True)
-            return None, None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
+            recommended_target = target_column or next((col for col in df.columns if col in df.select_dtypes(include=[np.number]).columns), None)
+            recommended_model = "Linear Regression"
+            return recommended_target, recommended_model, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}. مقدار پیش‌فرض انتخاب شد."
 
     async def train_and_predict(self, chat_id: int, target_column: Optional[str] = None):
         if self.data_processor.df is None:
@@ -378,36 +454,39 @@ class Predictor:
         try:
             logging.debug("شروع فرآیند پیش‌بینی")
             recommended_target, recommended_model, recommendation_text = await self.analyze_dataset_with_gemini(self.data_processor.df, target_column)
-            if not recommended_target or not recommended_model:
-                logging.error(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
+            if not recommended_target:
+                logging.error(f"هیچ ستون عددی معتبری برای هدف یافت نشد: {recommendation_text}")
                 cursor = conn.cursor()
                 cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
                                (chat_id, self.data_processor.ai_id))
                 conn.commit()
-                raise HTTPException(status_code=500, detail=f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
+                raise HTTPException(status_code=400, detail="هیچ ستون عددی معتبری برای هدف یافت نشد.")
 
             target_column = recommended_target
             logging.debug(f"ستون هدف: {target_column}, مدل: {recommended_model}")
 
-            df_processed = pd.get_dummies(self.data_processor.df, drop_first=True)
+            df_processed = pd.get_dummies(self.data_processor.df.drop(columns=[target_column], errors='ignore'), drop_first=True)
+            df_processed[target_column] = self.data_processor.df[target_column]
+            logging.debug(f"ستون‌های پس از get_dummies: {df_processed.columns.tolist()}")
+
             if target_column not in df_processed.columns:
-                logging.error(f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
+                logging.error(f"ستون هدف {target_column} در داده‌های پردازش‌شده وجود ندارد.")
                 cursor = conn.cursor()
                 cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
                                (chat_id, self.data_processor.ai_id))
                 conn.commit()
-                raise HTTPException(status_code=400, detail=f"ستون هدف {target_column} در داده‌ها وجود ندارد.")
+                raise HTTPException(status_code=400, detail=f"ستون هدف {target_column} در داده‌های پردازش‌شده وجود ندارد.")
 
-            X = df_processed.drop(columns=[target_column])
-            y = df_processed[target_column]
-
-            if y.dtype not in [np.float64, np.float32, np.int64, np.int32]:
+            if df_processed[target_column].dtype not in [np.float64, np.float32, np.int64, np.int32]:
                 logging.error(f"ستون هدف {target_column} غیرعددی است.")
                 cursor = conn.cursor()
                 cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
                                (chat_id, self.data_processor.ai_id))
                 conn.commit()
                 raise HTTPException(status_code=400, detail="ستون هدف پیشنهادی باید عددی باشد.")
+
+            X = df_processed.drop(columns=[target_column])
+            y = df_processed[target_column]
 
             if X.empty:
                 logging.error("هیچ ستون برای ویژگی‌ها یافت نشد.")
@@ -424,6 +503,25 @@ class Predictor:
                                (chat_id, self.data_processor.ai_id))
                 conn.commit()
                 raise HTTPException(status_code=400, detail="داده‌های کافی برای آموزش مدل وجود ندارد.")
+
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            if not numeric_cols.empty:
+                X_numeric = X[numeric_cols]
+                vif_data = pd.DataFrame()
+                vif_data["feature"] = X_numeric.columns
+                vif_data["VIF"] = [variance_inflation_factor(X_numeric.fillna(0).values, i) for i in range(X_numeric.shape[1])]
+                high_vif_cols = vif_data[vif_data["VIF"] > 10]["feature"].tolist()
+                if high_vif_cols:
+                    logging.debug(f"حذف ستون‌های با VIF بالا: {high_vif_cols}")
+                    X_numeric = X_numeric.drop(columns=high_vif_cols)
+                X = X_numeric
+            else:
+                logging.error("هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
+                               (chat_id, self.data_processor.ai_id))
+                conn.commit()
+                raise HTTPException(status_code=400, detail="هیچ ستون عددی برای ویژگی‌ها یافت نشد.")
 
             X = X.loc[:, X.var(numeric_only=True) > 0]
             X = X.loc[:, X.notna().any()]
@@ -471,11 +569,8 @@ class Predictor:
 
             if recommended_model not in models:
                 logging.error(f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
-                cursor = conn.cursor()
-                cursor.execute("UPDATE dbo.result_table SET status = 'failed' WHERE chat_id = ? AND ai_id = ?",
-                               (chat_id, self.data_processor.ai_id))
-                conn.commit()
-                raise HTTPException(status_code=400, detail=f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
+                recommended_model = "Linear Regression"
+                logging.debug("مدل پیش‌فرض Linear Regression انتخاب شد.")
 
             try:
                 model = models[recommended_model]
@@ -561,7 +656,7 @@ predictor = Predictor(data_processor)
 
 class PredictRequest(BaseModel):
     chat_id: int
-    target_column: Optional[str] = None
+    target_column: str  # ستون هدف اجباری است
 
 @app.get("/")
 async def index():
@@ -580,6 +675,20 @@ async def upload_file(file: UploadFile, chat_id: int = Form(...)):
         logging.error(f"خطا در آپلود فایل: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/get_numeric_columns/{chat_id}")
+async def get_numeric_columns(chat_id: int):
+    try:
+        await data_processor.load_file_from_db(chat_id)
+        numeric_cols = data_processor.df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns.tolist()
+        if not numeric_cols:
+            logging.error(f"هیچ ستون عددی برای chat_id {chat_id} یافت نشد.")
+            raise HTTPException(status_code=400, detail="هیچ ستون عددی در دیتاست یافت نشد.")
+        logging.debug(f"ستون‌های عددی برای chat_id {chat_id}: {numeric_cols}")
+        return {"chat_id": chat_id, "numeric_columns": numeric_cols}
+    except Exception as e:
+        logging.error(f"خطا در بازیابی ستون‌های عددی برای chat_id {chat_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/predict")
 async def predict(request: PredictRequest):
     try:
@@ -593,18 +702,42 @@ async def predict(request: PredictRequest):
 async def predict_with_target(request: PredictRequest):
     try:
         await data_processor.load_file_from_db(request.chat_id)
-        if request.target_column and request.target_column not in data_processor.df.columns:
-            logging.error(f"ستون هدف {request.target_column} در داده‌ها وجود ندارد.")
-            raise HTTPException(status_code=400, detail=f"ستون هدف {request.target_column} در داده‌ها وجود ندارد.")
+        # تمیز کردن نام ستون‌ها: حذف فاصله‌های اضافی
+        data_processor.df.columns = data_processor.df.columns.str.strip()
+        # گرفتن ستون‌های عددی
+        numeric_cols = data_processor.df.select_dtypes(include=[np.number]).columns.str.strip().tolist()
+        
+        if not numeric_cols:
+            logging.error(f"هیچ ستون عددی برای chat_id {request.chat_id} یافت نشد.")
+            raise HTTPException(status_code=400, detail="هیچ ستون عددی در دیتاست یافت نشد.")
+        
+        if not request.target_column:
+            logging.error(f"ستون هدف برای chat_id {request.chat_id} ارائه نشده است.")
+            raise HTTPException(
+                status_code=400,
+                detail=f"لطفاً یک ستون هدف عددی ارائه کنید. ستون‌های عددی موجود: {numeric_cols}"
+            )
 
-        if request.target_column and data_processor.df[request.target_column].dtype not in [np.float64, np.float32, np.int64, np.int32]:
-            logging.error(f"ستون هدف {request.target_column} غیرعددی است.")
-            raise HTTPException(status_code=400, detail="ستون هدف باید عددی باشد.")
+        # تمیز کردن target_column ارسالی برای مقایسه
+        target_column_cleaned = request.target_column.strip()
+        if target_column_cleaned not in data_processor.df.columns:
+            logging.error(f"ستون هدف {target_column_cleaned} در دیتاست وجود ندارد: {data_processor.df.columns.tolist()}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"ستون هدف {target_column_cleaned} در دیتاست وجود ندارد. ستون‌های موجود: {data_processor.df.columns.tolist()}"
+            )
 
-        response_data = await predictor.train_and_predict(request.chat_id, request.target_column)
+        if target_column_cleaned not in numeric_cols:
+            logging.error(f"ستون هدف {target_column_cleaned} غیرعددی است: {numeric_cols}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"ستون هدف {target_column_cleaned} باید عددی باشد. ستون‌های عددی موجود: {numeric_cols}"
+            )
+
+        response_data = await predictor.train_and_predict(request.chat_id, target_column_cleaned)
         return response_data
     except Exception as e:
-        logging.error(f"خطا در پیش‌بینی با ستون هدف انتخاب‌شده: {str(e)}", exc_info=True)
+        logging.error(f"خطا در پیش‌بینی با ستون هدف: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/get_results/{chat_id}")
