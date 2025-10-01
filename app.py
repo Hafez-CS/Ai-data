@@ -1,456 +1,463 @@
-import pandas as pd
-import numpy as np
-import logging
-import matplotlib.pyplot as plt
-from matplotlib import font_manager
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+# app.py - نسخه نهایی با قابلیت انتخاب "حالت انتخاب هدف" و DeepSeek AI
+
+import os
 import io
-import os
-from typing import Optional
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.svm import SVR
-from sklearn.preprocessing import StandardScaler
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
-from google import genai
-from google.genai import types
-import arabic_reshaper
-from bidi.algorithm import get_display
-import os
 import json
+from typing import Dict, Any, List, Optional, Tuple
 
+import numpy as np
+import pandas as pd
+import httpx # 👈 جدید: برای فراخوانی API
+from dotenv import load_dotenv # 👈 جدید: برای لود کردن متغیرهای محیطی
 
-# Access the API key
-api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I" # کلید API خود را اینجا قرار دهید
-if not api_key:
-    raise ValueError("GEMINI_API_KEY not found or is empty")
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form 
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel 
 
+from anyio import to_thread
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+# Sklearn Imports
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+
+# Algorithm Imports (XGBoost and LightGBM are optional)
 try:
-    import xgboost as xgb
+    from xgboost import XGBRegressor
 except ImportError:
-    xgb = None
-    logging.warning("کتابخانه xgboost نصب نشده است. XGBoost در دسترس نخواهد بود.")
+    XGBRegressor = None
+try:
+    from lightgbm import LGBMRegressor
+except ImportError:
+    LGBMRegressor = None
 
-# تنظیم لاگ‌گیری با جزئیات بیشتر
-logging.basicConfig(
-    filename='app_errors.log',
-    filemode='a',
-    format='%(asctime)s - %(levelname)s - %(message)s - %(pathname)s:%(lineno)d',
-    level=logging.DEBUG
+# Allowed Algorithms
+ALLOWED_REGRESSORS = ["LinearRegression", "RandomForestRegressor"]
+if XGBRegressor:
+    ALLOWED_REGRESSORS.append("XGBRegressor")
+if LGBMRegressor:
+    ALLOWED_REGRESSORS.append("LGBMRegressor")
+
+
+# ===================== تنظیمات محیطی و AI =====================
+
+load_dotenv() # 👈 لود کردن متغیرهای محیطی از .env
+
+AI_PROVIDER = os.getenv("AI_PROVIDER")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://openrouter.ai/api/v1")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-chat")
+
+
+# ===================== FastAPI Setup =====================
+
+app = FastAPI(
+    title="Smart Financial Forecasting Platform (Unified API)",
+    description=("Supports Regression Models with AI Target Selection."),
+    version="2.3.0", # نسخه به روز شده
 )
+PLOT_DIR = "static/plots"  
+DATA_DIR = "static/data"    
+
+if not os.path.exists(PLOT_DIR):
+    os.makedirs(PLOT_DIR)
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+from fastapi.staticfiles import StaticFiles
+app.mount("/static/plots", StaticFiles(directory=PLOT_DIR), name="static_plots")
+app.mount("/static/data", StaticFiles(directory=DATA_DIR), name="static_data")
 
 
-font_path = "path/to/Vazir.ttf"  
-if os.path.exists(font_path):
-    font_manager.fontManager.addfont(font_path)
-    plt.rcParams["font.family"] = "Vazir"
-else:
-    logging.warning("فونت Vazir یافت نشد. از فونت پیش‌فرض استفاده می‌شود.")
-    plt.rcParams["font.family"] = "sans-serif"
+class FullAnalysisRequest(BaseModel):
+    test_size: float = 0.2
+    random_state: int = 42
+    max_hist: int = 6
+    max_rows_preview: int = 5
 
-app = FastAPI(title="Advanced Financial Predictor API")
 
-class DataProcessor:
-    def __init__(self):
-        self.df = None
+# ===================== توابع کمکی (بدون تغییر) =====================
 
-    async def load_file(self, file: UploadFile):
-        logging.debug(f"بارگذاری فایل: {file.filename}")
-        try:
-            # بررسی پسوند فایل و استفاده از تابع مناسب برای خواندن
-            if file.filename.endswith('.csv'):
-                self.df = pd.read_csv(file.file)
-                logging.debug("فایل CSV با موفقیت خوانده شد.")
-            elif file.filename.endswith(('.xlsx', '.xls')):
-                self.df = pd.read_excel(file.file)
-                logging.debug("فایل Excel با موفقیت خوانده شد.")
-            else:
-                logging.error("فرمت فایل پشتیبانی نمی‌شود.")
-                raise ValueError("فرمت فایل پشتیبانی نمی‌شود. فقط فایل‌های CSV و Excel مجاز هستند.")
-            
-            # بررسی اولیه داده‌ها
-            if self.df.empty:
-                logging.error("فایل بارگذاری‌شده خالی است.")
-                raise ValueError("فایل بارگذاری‌شده خالی است.")
-            
-            # اجرای خودکار پاک‌سازی و داده‌کاوی
-            logging.debug("شروع پاک‌سازی داده‌ها")
-            clean_report = self.clean_data()
-            logging.debug("شروع داده‌کاوی")
-            mine_report = self.mine_data()
-            
-            logging.info(f"فایل {file.filename} با موفقیت بارگذاری و پردازش شد.")
-            return {
-                "message": "فایل با موفقیت بارگذاری شد!",
-                "columns": self.df.columns.tolist(),
-                "cleaning_report": clean_report,
-                "mining_report": mine_report
-            }
-        except Exception as e:
-            logging.error(f"خطا در بارگذاری فایل {file.filename}: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در بارگذاری فایل: {str(e)}")
+def generate_plot(plot_func, input_filename: str, *args, target_name=None, title=None, xlabel=None, ylabel=None, custom_logic=None, **kwargs) -> str:
+    """Generates and saves the matplotlib plot to PLOT_DIR."""
+    plt.figure(figsize=(12, 7))
+    plot_func(*args, **kwargs)
+    
+    if custom_logic:
+        custom_logic() 
 
-    def clean_data(self):
-        if self.df is None:
-            logging.error("هیچ داده‌ای برای پاک‌سازی وجود ندارد.")
-            raise HTTPException(status_code=400, detail="لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
-        try:
-            df_cleaned = self.df.copy()
-            logging.debug(f"شروع پاک‌سازی داده‌ها با {len(df_cleaned)} ردیف و {len(df_cleaned.columns)} ستون")
-            
-            # حذف ستون‌های کاملاً NaN
-            df_cleaned = df_cleaned.dropna(axis=1, how='all')
-            logging.debug(f"پس از حذف ستون‌های کاملاً NaN: {len(df_cleaned.columns)} ستون باقی ماند")
-            
-            numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
-            non_numeric_cols = df_cleaned.select_dtypes(exclude=[np.number]).columns
-            logging.debug(f"ستون‌های عددی: {numeric_cols.tolist()}")
-            logging.debug(f"ستون‌های غیرعددی: {non_numeric_cols.tolist()}")
+    if title: plt.title(title) 
+    if xlabel: plt.xlabel(xlabel) 
+    if ylabel: plt.ylabel(ylabel) 
+    plt.grid(True)
+    plt.tight_layout()
+    
+    base_name = os.path.splitext(input_filename)[0]
+    safe_target_name = "".join(c for c in target_name if c.isalnum() or c in ('_', '-')).strip().lower() if target_name else "default"
+    file_name = f"{base_name}_{safe_target_name}_chart.png"
+    
+    save_path = os.path.join(PLOT_DIR, file_name) 
+    plt.savefig(save_path, format="png", dpi=150) 
+    plt.close() 
+    
+    return file_name
 
-            # پر کردن مقادیر گمشده برای ستون‌های عددی
-            if not numeric_cols.empty:
-                df_cleaned[numeric_cols] = df_cleaned[numeric_cols].fillna(df_cleaned[numeric_cols].mean())
-                logging.debug("مقادیر گمشده ستون‌های عددی با میانگین پر شدند.")
-            
-            # پر کردن مقادیر گمشده برای ستون‌های غیرعددی
-            if not non_numeric_cols.empty:
-                for col in non_numeric_cols:
-                    mode_value = df_cleaned[col].mode()
-                    if not mode_value.empty:
-                        df_cleaned[col] = df_cleaned[col].fillna(mode_value[0])
-                    else:
-                        df_cleaned[col] = df_cleaned[col].fillna('')
-                logging.debug("مقادیر گمشده ستون‌های غیرعددی با مد یا رشته خالی پر شدند.")
 
-            # حذف داده‌های پرت برای ستون‌های عددی
-            initial_rows = len(df_cleaned)
-            for col in numeric_cols:
-                if df_cleaned[col].var() > 0:  # فقط ستون‌هایی با واریانس غیرصفر
-                    Q1 = df_cleaned[col].quantile(0.25)
-                    Q3 = df_cleaned[col].quantile(0.75)
-                    IQR = Q3 - Q1
-                    lower_bound = Q1 - 1.5 * IQR
-                    upper_bound = Q3 + 1.5 * IQR
-                    df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
-                    logging.debug(f"داده‌های پرت برای ستون {col} حذف شدند.")
-                else:
-                    logging.debug(f"ستون {col} واریانس صفر دارد و از حذف پرت‌ها صرف‌نظر شد.")
-
-            # بررسی اینکه داده‌های کافی باقی مانده‌اند
-            if len(df_cleaned) < 2 or df_cleaned[numeric_cols].dropna().empty:
-                logging.error("پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
-                raise HTTPException(status_code=400, detail="پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
-
-            self.df = df_cleaned
-            logging.info(f"پاک‌سازی داده‌ها با موفقیت انجام شد. ردیف‌های اولیه: {initial_rows}, ردیف‌های نهایی: {len(df_cleaned)}")
-            return {
-                "initial_rows": initial_rows,
-                "cleaned_rows": len(df_cleaned),
-                "message": "مقادیر گمشده پرشده با میانگین (ستون‌های عددی) و مد یا رشته خالی (ستون‌های غیرعددی). داده‌های پرت حذف شدند (روش IQR)."
-            }
-        except Exception as e:
-            logging.error(f"خطا در پاک‌سازی داده‌ها: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در پاک‌سازی داده‌ها: {str(e)}")
-
-    def mine_data(self):
-        if self.df is None:
-            logging.error("هیچ داده‌ای برای داده‌کاوی وجود ندارد.")
-            raise HTTPException(status_code=400, detail="لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
-        try:
-            desc_stats = self.df.describe(include='all').to_dict()
-            numeric_cols = self.df.select_dtypes(include=[np.number]).columns
-            corr_matrix = self.df[numeric_cols].corr().to_dict() if not numeric_cols.empty else {}
-            outlier_report = {}
-            for col in numeric_cols:
-                Q1 = self.df[col].quantile(0.25)
-                Q3 = self.df[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - 1.5 * IQR
-                upper_bound = Q3 + 1.5 * IQR
-                outliers = self.df[(self.df[col] < lower_bound) | (self.df[col] > upper_bound)][col]
-                outlier_report[col] = len(outliers)
-            logging.info("داده‌کاوی با موفقیت انجام شد.")
-            return {
-                "descriptive_stats": desc_stats,
-                "correlation_matrix": corr_matrix,
-                "outlier_report": outlier_report
-            }
-        except Exception as e:
-            logging.error(f"خطا در داده‌کاوی: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در داده‌کاوی: {str(e)}")
-
-class Predictor:
-    def __init__(self, data_processor: DataProcessor):
-        self.data_processor = data_processor
-        try:
-            # حذف این خط
-            # api_key = os.getenv("GEMINI_API_KEY")
-            # و استفاده از متغیر سراسری api_key که در بالا تعریف شده
-            if not api_key:
-                raise ValueError("GEMINI_API_KEY not found")
-            self.client = genai.Client(api_key=api_key)
-            self.model = "gemini-2.5-pro"
-            logging.debug("اتصال به Gemini API با موفقیت برقرار شد.")
-        except Exception as e:
-            logging.error(f"خطا در اتصال به Gemini API: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در اتصال به Gemini API: {str(e)}")
-
-    def analyze_dataset_with_gemini(self, df):
-        logging.debug("شروع تحلیل دیتاست با Gemini API")
-        try:
-            # نمونه‌برداری از داده‌ها (حداکثر 100 ردیف)
-            sample_size = min(100, len(df))
-            df_sample = df.sample(n=sample_size, random_state=42) if len(df) > sample_size else df
-            logging.debug(f"نمونه‌برداری انجام شد: {sample_size} ردیف")
-
-            # آماده‌سازی مشخصات دیتاست
-            numeric_cols = df.select_dtypes(include=[np.float64, np.float32, np.int64, np.int32]).columns
-            all_cols = df.columns.tolist()
-            desc_stats = df_sample.describe(include='all').to_string()
-            corr_matrix = df_sample[numeric_cols].corr().to_string() if not numeric_cols.empty else "هیچ ستون عددی وجود ندارد"
-            num_rows, num_cols = df.shape
-            missing_values = df.isnull().sum().sum()
-
-            # ساخت پرامپت برای Gemini
-            prompt = f"""
-            شما یک متخصص یادگیری ماشین هستید. من یک نمونه از دیتاست با مشخصات زیر دارم (نمونه شامل {sample_size} ردیف است):
-            - تعداد ردیف‌های کل دیتاست: {num_rows}
-            - تعداد ستون‌ها: {num_cols}
-            - تمام ستون‌ها: {all_cols}
-            - آمار توصیفی (بر اساس نمونه):
-            {desc_stats}
-            - ماتریس همبستگی (برای ستون‌های عددی نمونه):
-            {corr_matrix}
-            - تعداد مقادیر گمشده در کل دیتاست: {missing_values}
-
-            با توجه به این اطلاعات:
-            1. بهترین ستون برای استفاده به عنوان ستون هدف (target) در رگرسیون را پیشنهاد دهید. ستون هدف باید عددی باشد و بر اساس همبستگی، واریانس، یا اهمیت پیش‌بینی انتخاب شود.
-            2. بهترین الگوریتم یادگیری ماشین برای رگرسیون را از بین گزینه‌های زیر پیشنهاد دهید:
-            Linear Regression, Random Forest, Decision Tree, Gradient Boosting, SVR, XGBoost (اگر موجود باشد).
-            لطفاً فقط نام ستون هدف و نام الگوریتم را به صورت دقیق (مثلاً 'target_column: Sales' و 'model: Random Forest') و توضیح مختصری برای هر پیشنهاد ارائه دهید.
-            """
-
-            # تنظیم محتوا برای Gemini
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=prompt),
-                    ],
-                ),
-            ]
-            generate_content_config = types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(
-                    thinking_budget=-1,
-                ),
-            )
-
-            # دریافت پاسخ از Gemini
-            response_text = ""
-            for chunk in self.client.models.generate_content_stream(
-                model=self.model,
-                contents=contents,
-                config=generate_content_config,
-            ):
-                response_text += chunk.text
-            logging.debug("پاسخ Gemini دریافت شد.")
-
-            # استخراج نام ستون هدف و الگوریتم از پاسخ
-            recommended_target = None
-            recommended_model = None
-            available_models = ["Linear Regression", "Random Forest", "Decision Tree", 
-                               "Gradient Boosting", "SVR"]
-            if xgb:
-                available_models.append("XGBoost")
-            
-            lower_response = response_text.lower()
-            for col in numeric_cols:
-                if col.lower() in lower_response and "target_column" in lower_response:
-                    recommended_target = col
-                    break
-            
-            for model_name in available_models:
-                if model_name.lower() in lower_response:
-                    recommended_model = model_name
-                    break
-
-            if recommended_target and recommended_model:
-                logging.info(f"Gemini ستون هدف {recommended_target} و مدل {recommended_model} را پیشنهاد داد.")
-                return recommended_target, recommended_model, response_text
-            else:
-                logging.error("Gemini نتوانست ستون هدف یا مدل مناسبی پیشنهاد دهد.")
-                return None, None, response_text
-
-        except Exception as e:
-            logging.error(f"خطا در تحلیل دیتاست با Gemini API: {str(e)}", exc_info=True)
-            return None, None, f"خطا در تحلیل دیتاست با Gemini API: {str(e)}"
-
-    import json # اضافه کردن این خط به ابتدای فایل
-
-# ... بقیه کد ...
-
-    async def train_and_predict(self):
-        if self.data_processor.df is None:
-            logging.error("هیچ داده‌ای برای پیش‌بینی وجود ندارد.")
-            raise HTTPException(status_code=400, detail="لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
-        try:
-            logging.debug("شروع فرآیند پیش‌بینی")
-            # تحلیل دیتاست با Gemini API
-            recommended_target, recommended_model, recommendation_text = self.analyze_dataset_with_gemini(self.data_processor.df)
-            if not recommended_target or not recommended_model:
-                logging.error(f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
-                raise HTTPException(status_code=500, detail=f"Gemini نتوانست ستون هدف یا الگوریتم مناسبی پیشنهاد دهد: {recommendation_text}")
-
-            target_column = recommended_target
-            logging.debug(f"ستون هدف: {target_column}, مدل: {recommended_model}")
-
-            df_processed = pd.get_dummies(self.data_processor.df, drop_first=True)
-            X = df_processed.drop(columns=[target_column])
-            y = df_processed[target_column]
-
-            if y.dtype not in [np.float64, np.float32, np.int64, np.int32]:
-                logging.error(f"ستون هدف {target_column} غیرعددی است.")
-                raise HTTPException(status_code=400, detail="ستون هدف پیشنهادی باید عددی باشد.")
-
-            if X.empty:
-                logging.error("هیچ ستون برای ویژگی‌ها یافت نشد.")
-                raise HTTPException(status_code=400, detail="هیچ ستون برای ویژگی‌ها یافت نشد.")
-
-            if len(X) < 2 or len(y) < 2:
-                logging.error("داده‌های کافی برای آموزش مدل وجود ندارد.")
-                raise HTTPException(status_code=400, detail="داده‌های کافی برای آموزش مدل وجود ندارد.")
-
-            X = X.loc[:, X.var(numeric_only=True) > 0]
-            X = X.loc[:, X.notna().any()]
-            X.fillna(X.mean(numeric_only=True), inplace=True)
-            y.fillna(y.mean(), inplace=True)
-
-            if X.empty or len(X.columns) == 0:
-                logging.error("پس از حذف ستون‌های نامعتبر، هیچ ویژگی برای آموزش باقی نماند.")
-                raise HTTPException(status_code=400, detail="هیچ ویژگی معتبری برای آموزش مدل باقی نماند.")
-
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-
-            if np.any(np.isnan(X_scaled)) or np.any(np.isinf(X_scaled)):
-                logging.error("داده‌های استانداردشده شامل مقادیر NaN یا بی‌نهایت هستند.")
-                raise HTTPException(status_code=400, detail="داده‌های استانداردشده شامل مقادیر نامعتبر (NaN یا بی‌نهایت) هستند.")
-
-            X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-
-            if len(X_test) == 0 or len(y_test) == 0:
-                logging.error("داده‌های آزمایشی کافی نیست.")
-                raise HTTPException(status_code=400, detail="داده‌های آزمایشی کافی نیست.")
-
-            models = {
-                "Linear Regression": LinearRegression(),
-                "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
-                "Decision Tree": DecisionTreeRegressor(random_state=42),
-                "Gradient Boosting": GradientBoostingRegressor(random_state=42),
-                "SVR": SVR()
-            }
-            if xgb:
-                models["XGBoost"] = xgb.XGBRegressor(random_state=42)
-
-            if recommended_model not in models:
-                logging.error(f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
-                raise HTTPException(status_code=400, detail=f"الگوریتم پیشنهادی Gemini ({recommended_model}) در دسترس نیست.")
-
+def basic_clean(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.dropna(axis=1, how="all").copy()
+    for col in df.columns:
+        if df[col].dtype == "object":
             try:
-                model = models[recommended_model]
-                model.fit(X_train, y_train)
-                y_pred = model.predict(X_test)
-                logging.debug(f"مدل {recommended_model} با موفقیت آموزش دید.")
+                coerced = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce")
+                if coerced.notna().mean() > 0.5:
+                    df[col] = coerced
+            except Exception:
+                pass
+    return df
 
-                future_X = X_test[-5:]
-                future_pred = model.predict(future_X)
-                logging.debug("پیش‌بینی‌های آینده تولید شدند.")
+def split_cols(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
+    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    cat_cols = [c for c in df.columns if c not in num_cols and df[c].nunique() > 1]
+    return num_cols, cat_cols
 
-                # تولید و ذخیره نمودار
-                fig = plt.Figure(figsize=(14, 8))
-                ax = fig.add_subplot(111)
-                indices = np.arange(len(y_test))
+def make_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
+    num_cols, cat_cols = split_cols(X)
+    num_pipe = Pipeline([("imputer", SimpleImputer(strategy="median")),("scaler", StandardScaler())])
+    cat_pipe = Pipeline([("imputer", SimpleImputer(strategy="most_frequent")),("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False))]) if cat_cols else "drop"
+    return ColumnTransformer(transformers=[("num", num_pipe, num_cols),("cat", cat_pipe, cat_cols)],remainder="drop")
 
-                ax.plot(indices, y_test.values, color='blue', label=get_display(arabic_reshaper.reshape('مقادیر واقعی')), linewidth=2)
-                ax.plot(indices, y_pred, color='orange', label=get_display(arabic_reshaper.reshape('مقادیر پیش‌بینی‌شده')), linewidth=2)
-                ax.plot(np.arange(len(y_test), len(y_test) + 5), future_pred, color='green', linestyle='--', 
-                         label=get_display(arabic_reshaper.reshape('پیش‌بینی آینده')), linewidth=2)
+# تابع Fallback داخلی (در صورت عدم دسترسی به AI استفاده می‌شود)
+def fallback_algo_and_target(df: pd.DataFrame) -> Dict[str, Any]:
+    cols = df.columns.tolist()
+    num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+    
+    if "RandomForestRegressor" in ALLOWED_REGRESSORS: algo = "RandomForestRegressor"
+    elif "XGBRegressor" in ALLOWED_REGRESSORS: algo = "XGBRegressor"
+    else: algo = "LinearRegression"
+    
+    cand_names = ["profit","net_profit","revenue","income","sales","turnover","cost","expense","net_income", "charges", "price", "value", "ph", "quality"] 
+    lower_cols = [c.lower() for c in cols]
+    probable_target = None
+    for nm in cand_names:
+        if nm in lower_cols:
+            # پیدا کردن ستون اصلی که نام کوچک‌شده آن تطابق دارد
+            probable_target = cols[lower_cols.index(nm)] 
+            break
+    
+    # اطمینان از اینکه ستون انتخاب شده عددی است
+    if probable_target is None or probable_target not in num_cols: 
+        probable_target = num_cols[-1] if num_cols else None
+    
+    return {"algorithm": algo, "target_column": probable_target}
 
-                ax.set_xlabel(get_display(arabic_reshaper.reshape("اندیس داده‌ها")))
-                ax.set_ylabel(get_display(arabic_reshaper.reshape("مقادیر")))
-                ax.set_title(get_display(arabic_reshaper.reshape(f"پیش‌بینی {target_column} با مدل {recommended_model}")))
-                ax.legend()
-                ax.grid(True)
-                fig.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
+# ===================== تابع فراخوانی DeepSeek AI 👈 جدید =====================
 
-                canvas = FigureCanvas(fig)
-                buf = io.BytesIO()
-                canvas.print_png(buf)
-                buf.seek(0)
+async def get_ai_suggestions_from_deepseek(df: pd.DataFrame, allowed_regressors: List[str]) -> Dict[str, Any]:
+    """
+    از DeepSeek API برای انتخاب هوشمندانه بهترین ستون هدف و الگوریتم رگرسیون استفاده می‌کند.
+    در صورت خطا، به تابع fallback داخلی برمی‌گردد.
+    """
+    if AI_PROVIDER != "deepseek" or not DEEPSEEK_API_KEY:
+        print("DeepSeek API not configured or API key missing. Falling back to internal logic.")
+        return fallback_algo_and_target(df) 
+    
+    # تهیه خلاصه اطلاعات برای DeepSeek
+    # نمایش یک سطر از دیتافریم (نمونه‌ای از نوع داده‌ها)
+    column_info = df.head(1).T.to_dict().get(0, {}) 
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    
+    prompt_message = f"""
+    You are an AI expert in financial data analysis and machine learning model selection.
+    Your task is to select the BEST target column (for regression) and a suitable algorithm 
+    from the allowed list for a predictive model based on the provided CSV data.
+    
+    1. The target column MUST be **numeric** and present in the 'Available Numeric Columns for Target' list.
+    2. The selected algorithm MUST be from the 'Allowed Algorithms' list.
+    3. Prioritize columns related to financial outcomes (e.g., 'profit', 'revenue', 'price', 'value') 
+       or measurable outcomes ('quality', 'ph') as the target.
+    
+    Available Columns (Type/Sample Value - First Row):
+    {column_info}
+    
+    Available Numeric Columns for Target:
+    {numeric_cols}
+    
+    Allowed Algorithms (Select ONE):
+    {allowed_regressors}
+    
+    Output MUST be a single JSON object (with no other text/markdown or explanation) like this:
+    {{"target_column": "SelectedColumnName", "algorithm": "SelectedAlgorithmName"}}
+    """
 
-                filename = f"prediction_{target_column}.png"
-                with open(filename, "wb") as f:
-                    f.write(buf.getvalue())
-                logging.debug(f"نمودار در {filename} ذخیره شد.")
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-                logging.info(f"پیش‌بینی با مدل {recommended_model} برای ستون {target_column} با موفقیت انجام شد.")
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are an expert ML model selector who outputs only a single JSON object."},
+            {"role": "user", "content": prompt_message}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 150 # فضای کافی برای پاسخ JSON
+    }
 
-                # **تغییرات اصلی: ذخیره داده‌ها در یک متغیر و سپس در فایل**
-                response_data = {
-                    "message": f"پیش‌بینی با مدل {recommended_model} انجام شد.",
-                    "target_column": target_column,
-                    "gemini_recommendation": recommendation_text,
-                    "plot_url": f"/plot/{filename}",
-                    "prediction_data": {
-                        "actual_values": y_test.tolist(),
-                        "predicted_values": y_pred.tolist(),
-                        "future_predictions": future_pred.tolist()
-                    }
-                }
+    try:
+        async with httpx.AsyncClient(base_url=DEEPSEEK_BASE_URL) as client:
+            print(f"Calling DeepSeek at {DEEPSEEK_BASE_URL}/chat/completions with model {DEEPSEEK_MODEL}")
+            response = await client.post("/chat/completions", headers=headers, json=payload, timeout=30.0)
+            response.raise_for_status() 
+            
+            response_json = response.json()
+            raw_content = response_json['choices'][0]['message']['content'].strip()
 
-                # ذخیره دیکشنری به عنوان فایل JSON در یک فایل متنی
-                output_filename = f"prediction_data_{target_column}.json" # میتونید پسوند رو .txt هم بزارید
-                with open(output_filename, 'w', encoding='utf-8') as f:
-                    json.dump(response_data, f, ensure_ascii=False, indent=4)
+            # تلاش برای تمیز کردن خروجی (اگر در Markdown JSON محصور شده باشد)
+            if raw_content.startswith("```json"):
+                raw_content = raw_content.strip("```json").strip("```").strip()
+                
+            ai_choice = json.loads(raw_content)
+            
+            # اعتبارسنجی خروجی AI
+            target = ai_choice.get("target_column")
+            algo = ai_choice.get("algorithm")
 
-                logging.info(f"داده‌های پیش‌بینی در فایل {output_filename} ذخیره شدند.")
+            if target in df.columns and algo in allowed_regressors:
+                print(f"DeepSeek selected target: {target}, algorithm: {algo}")
+                return {"target_column": target, "algorithm": algo}
+            else:
+                print(f"DeepSeek output invalid or column/algo not found. Falling back. Target: {target}, Algo: {algo}")
+                return fallback_algo_and_target(df)
+            
+    except Exception as e:
+        print(f"Error calling DeepSeek API: {type(e).__name__}: {e}. Falling back to internal logic.")
+        return fallback_algo_and_target(df)
 
-                return JSONResponse(content=response_data)
+# ===================== Prediction Logic (بدون تغییر) =====================
+def run_prediction(df: pd.DataFrame, target: str, algo: str, input_filename: str, test_size: float = 0.2, random_state: int = 42) -> Dict[str, Any]:
+    """Runs the ML model, generates files, and extracts prediction data."""
+    
+    print(f"--- START: Running prediction for target: {target} with {algo}. Data size: {df.shape}") 
 
-            except Exception as e:
-                logging.error(f"خطا در آموزش مدل {recommended_model}: {str(e)}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"خطا در آموزش مدل {recommended_model}: {str(e)}")
+    if target not in df.columns: raise ValueError(f"Target column '{target}' not found in data.")
+    if not pd.api.types.is_numeric_dtype(df[target]): df[target] = pd.to_numeric(df[target], errors="coerce")
+    clean_df = df.dropna(subset=[target])
+    if clean_df.empty or clean_df.shape[0] < 5: raise ValueError("Data is too small or target column is empty after cleaning.")
 
-        except Exception as e:
-            logging.error(f"خطا در فرآیند پیش‌بینی: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در فرآیند پیش‌بینی: {str(e)}")
+    feature_cols = [c for c in clean_df.columns if c != target]
+    if not feature_cols: raise ValueError("Data contains only the target column after cleaning. Cannot train a model.")
+        
+    X = clean_df[feature_cols] 
+    y = clean_df[target]
+    pre = make_preprocessor(X)
+    
+    # Model Selection
+    if algo == "XGBRegressor" and XGBRegressor:
+        model_instance = XGBRegressor(n_estimators=300, random_state=random_state, n_jobs=-1)
+    elif algo == "LGBMRegressor" and LGBMRegressor:
+        model_instance = LGBMRegressor(n_estimators=300, random_state=random_state, n_jobs=-1)
+    elif algo == "RandomForestRegressor":
+        model_instance = RandomForestRegressor(n_estimators=300, random_state=random_state, n_jobs=-1)
+    elif algo == "LinearRegression":
+        model_instance = LinearRegression()
+    else:
+        # Fallback to default if selected algo is unavailable
+        algo = "LinearRegression"
+        model_instance = LinearRegression()
 
-data_processor = DataProcessor()
-predictor = Predictor(data_processor)
 
-@app.post("/upload_file")
-async def upload_file(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
-        logging.error(f"فرمت فایل {file.filename} پشتیبانی نمی‌شود.")
-        raise HTTPException(status_code=400, detail="لطفاً یک فایل CSV یا Excel بارگذاری کنید.")
-    return await data_processor.load_file(file)
+    pipe = Pipeline([("preprocess", pre), ("model", model_instance)])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state, shuffle=False)
+    
+    pipe.fit(X_train, y_train) 
+    print("--- MID: Model training completed.") 
 
-@app.post("/predict")
-async def predict():
-    return await predictor.train_and_predict()
+    # --- Metrics Calculation ---
+    if X_test.empty:
+        y_pred_test = np.array([])
+        mae = float('nan') 
+        rmse = float('nan') 
+    else:
+        y_pred_test = pipe.predict(X_test)
+        mae = float(mean_absolute_error(y_test, y_pred_test))
+        rmse = float(np.sqrt(mean_squared_error(y_test, y_pred_test)))
+    # --- End Metrics Calculation ---
 
-@app.get("/plot/{filename}")
-async def get_plot(filename: str):
-    if not os.path.exists(filename):
-        logging.error(f"نمودار {filename} یافت نشد.")
-        raise HTTPException(status_code=404, detail="نمودار یافت نشد.")
-    with open(filename, "rb") as f:
-        logging.debug(f"نمودار {filename} با موفقیت ارسال شد.")
-        return StreamingResponse(io.BytesIO(f.read()), media_type="image/png")
+    # Future Prediction
+    FUTURE_STEPS = 5 
+    if X_test.shape[0] > 0:
+        last_X_test_row = X_test.iloc[[X_test.shape[0] - 1]]
+        X_future = pd.concat([last_X_test_row] * FUTURE_STEPS, ignore_index=True)
+        y_future_pred = pipe.predict(X_future)
+    else:
+        y_future_pred = np.array([])
+    y_future_pred_list = y_future_pred.tolist()
+    
+    # Combine raw data
+    y_actual_full = y_train.tolist() + y_test.tolist()
+    y_pred_train = pipe.predict(X_train)
+    y_pred_full = y_pred_train.tolist() + y_pred_test.tolist()
+    
+    # Apply Smoothing (Moving Average)
+    SMOOTHING_WINDOW = max(5, int(len(y_actual_full) * 0.01)) 
+    y_actual_series = pd.Series(y_actual_full)
+    y_pred_series = pd.Series(y_pred_full)
+    y_actual_smooth = y_actual_series.rolling(window=SMOOTHING_WINDOW, min_periods=1, center=True).mean().tolist()
+    y_pred_smooth = y_pred_series.rolling(window=SMOOTHING_WINDOW, min_periods=1, center=True).mean().tolist()
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Plotting Logic (uses SMOOTHED data)
+    indices_full = np.arange(len(y_actual_full)) 
+    indices_future = np.arange(len(y_actual_full) - 1, len(y_actual_full) + FUTURE_STEPS) 
+    
+    def add_future_line():
+        future_plot_data = [y_pred_smooth[-1]] + y_future_pred_list
+        plt.plot(indices_full, y_actual_smooth, label='Actual Values (Smoothed)', color='blue', linewidth=2) 
+        plt.plot(indices_full, y_pred_smooth, label='Predicted Values (Smoothed)', color='orange', linewidth=2)
+        plt.plot(indices_future, future_plot_data, label='Future Prediction', color='green', linestyle='--', linewidth=2)
+        plt.legend() 
+
+    # ارسال target_name به generate_plot برای نام‌گذاری خروجی
+    chart_filename = generate_plot(
+        plt.plot, input_filename,
+        [0], [0], target_name=target,
+        title=f"Smoothed Prediction of {target} using {algo} model (Window={SMOOTHING_WINDOW})", xlabel="Data Index", ylabel=target,
+        custom_logic=add_future_line
+    )
+    print(f"--- MID: Plot generated: {chart_filename}") 
+    
+    # ذخیره داده‌های JSON
+    base_name = os.path.splitext(input_filename)[0]
+    safe_target_name = "".join(c for c in target if c.isalnum() or c in ('_', '-')).strip().lower()
+    data_filename = f"{base_name}_{safe_target_name}_data.json"
+    data_save_path = os.path.join(DATA_DIR, data_filename) 
+    
+    raw_prediction_data = {
+        "actual_values": y_actual_smooth, 
+        "predicted_values": y_pred_smooth,
+        "future_predictions": y_future_pred_list,
+        "smoothing_window": SMOOTHING_WINDOW
+    }
+    
+    with open(data_save_path, 'w') as f:
+        json.dump(raw_prediction_data, f, indent=4)
+        
+    print("--- END: Prediction function finished successfully.")
+        
+    return {
+        "algorithm_used": algo,
+        "target_used": target,
+        "metrics": {"MAE": mae, "RMSE": rmse},
+        "prediction_chart_filename": chart_filename,
+        "prediction_data_url": f"/static/data/{data_filename}", 
+        "prediction_status": "Success"
+    }
+
+
+# ===================== Unified Endpoint (POST) 👈 تغییرات اصلی در منطق AI =====================
+@app.post("/full_analysis")
+async def full_analysis(
+    file: UploadFile = File(..., description="The CSV file containing financial data."),
+    config: str = Form(
+        '{"test_size":0.2,"random_state":42,"max_hist":6,"max_rows_preview":5}',
+        description="Configuration JSON as a string (e.g., '{\"test_size\":0.2, ...}')."
+    ),
+    selection_mode: str = Form(..., description="Selection mode: 'ai' for automatic selection or 'user' for manual."),
+    target_column: Optional[str] = Form(None, description="The specific target column name if selection_mode is 'user'.")
+):
+    
+    all_columns = []
+    target_to_use = "N/A" 
+    algo_to_use = "RandomForestRegressor" # پیش‌فرض داخلی
+    
+    # بررسی صحت selection_mode
+    if selection_mode not in ["ai", "user"]:
+        raise HTTPException(status_code=400, detail="selection_mode must be 'ai' or 'user'.")
+        
+    try:
+        config_dict = json.loads(config)
+        config_model = FullAnalysisRequest(**config_dict)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid config format: {e}")
+        
+    try:
+        input_filename = file.filename
+        if not input_filename: input_filename = "uploaded_data.csv"
+        
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content)) 
+        df = basic_clean(df)
+        
+        all_columns = df.columns.tolist() 
+
+        # 1. منطق تعیین ستون هدف
+        if selection_mode == "user":
+            # حالت کاربر: ستون هدف باید توسط کاربر ارسال شده باشد
+            if not target_column or target_column not in all_columns:
+                return JSONResponse(status_code=400, content={
+                    "message": "در حالت انتخابی کاربر، ستون هدف معتبر و موجود در فایل باید ارسال شود.",
+                    "all_columns": all_columns,
+                    "target_column": target_column if target_column else "N/A",
+                    "initial_status": "Error"
+                })
+            target_to_use = target_column
+            
+        else: # selection_mode == "ai"
+            # 💥 فراخوانی تابع AI
+            ai_suggestions = await get_ai_suggestions_from_deepseek(df, ALLOWED_REGRESSORS)
+            
+            target_to_use = ai_suggestions.get("target_column")
+            algo_to_use = ai_suggestions.get("algorithm", algo_to_use)
+            
+            if target_to_use is None or target_to_use not in all_columns: 
+                 # اگر AI نتوانست ستون معتبری پیدا کند
+                return JSONResponse(content={
+                     "message": "AI نتوانست ستون هدف معتبری پیدا کند. لطفاً خودتان از لیست زیر یک ستون انتخاب کنید.",
+                     "all_columns": all_columns,
+                     "target_column": "N/A",
+                     "initial_status": "ColumnSelectionRequired"
+                 })
+
+        # 2. اجرای پیش‌بینی (استفاده از to_thread برای تابع CPU-Bound)
+        prediction_results = await to_thread.run_sync(
+            run_prediction, 
+            df, target_to_use, algo_to_use, input_filename, config_model.test_size, config_model.random_state
+        )
+
+        # 3. تولید خروجی نهایی
+        final_response = {
+            "message": f"تحلیل مالی با ستون '{target_to_use}' انجام شد.",
+            "target_column": prediction_results.get("target_used", "N/A"),
+            "algorithm_used": prediction_results.get("algorithm_used", "N/A"),
+            "plot_url": f"/static/plots/{prediction_results.get('prediction_chart_filename', '')}", 
+            "prediction_data_url": prediction_results.get('prediction_data_url', ''), 
+            "metrics": prediction_results.get("metrics", {}),
+            "all_columns": all_columns, 
+            "initial_status": "Success" 
+        }
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        # مدیریت خطاهای داخلی - اطمینان از وجود all_columns
+        error_message = f"خطا در اجرای مدل: {type(e).__name__}: {str(e)}"
+        return JSONResponse(
+            status_code=500, 
+            content={
+                "message": error_message,
+                "all_columns": all_columns,
+                "target_column": target_to_use,
+                "initial_status": "Error"
+            }
+        )
+
+    return JSONResponse(content=final_response)
