@@ -40,7 +40,7 @@ app.add_middleware(
 )
 
 # Access the API key
-api_key = "AIzaSyB8Rz8vHUO0ASP90_QF7VR9pvkXYWgfH_I"  # Replace with your actual API key
+api_key = ""  # Replace with your actual API key
 if not api_key:
     raise ValueError("GEMINI_API_KEY not found or is empty")
 
