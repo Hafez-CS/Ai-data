@@ -6,6 +6,7 @@ from matplotlib import font_manager
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import io
 import os
+from sklearn.impute import KNNImputer
 from typing import Optional
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -89,87 +90,85 @@ class DataProcessor:
 
     def clean_data(self):
         if self.df is None:
-            logging.error("هیچ داده‌ای برای پاک‌سازی وجود ندارد.")
             raise HTTPException(status_code=400, detail="لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
-        try:
-            df_cleaned = self.df.copy()
-            logging.debug(f"شروع پاک‌سازی داده‌ها با {len(df_cleaned)} ردیف و {len(df_cleaned.columns)} ستون")
-            
-            df_cleaned = df_cleaned.dropna(axis=1, how='all')
-            logging.debug(f"پس از حذف ستون‌های کاملاً NaN: {len(df_cleaned.columns)} ستون باقی ماند")
-            
-            numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
-            non_numeric_cols = df_cleaned.select_dtypes(exclude=[np.number]).columns
-            logging.debug(f"ستون‌های عددی: {numeric_cols.tolist()}")
-            logging.debug(f"ستون‌های غیرعددی: {non_numeric_cols.tolist()}")
 
-            if not numeric_cols.empty:
-                df_cleaned[numeric_cols] = df_cleaned[numeric_cols].fillna(df_cleaned[numeric_cols].mean())
-                logging.debug("مقادیر گمشده ستون‌های عددی با میانگین پر شدند.")
-            
-            if not non_numeric_cols.empty:
-                for col in non_numeric_cols:
-                    mode_value = df_cleaned[col].mode()
-                    if not mode_value.empty:
-                        df_cleaned[col] = df_cleaned[col].fillna(mode_value[0])
-                    else:
-                        df_cleaned[col] = df_cleaned[col].fillna('')
-                logging.debug("مقادیر گمشده ستون‌های غیرعددی با مد یا رشته خالی پر شدند.")
+        df_cleaned = self.df.copy()
+        columns_before = df_cleaned.columns.tolist()
+        df_cleaned = df_cleaned.dropna(axis=1, how='all')
+        columns_after = df_cleaned.columns.tolist()
+        dropped_columns = set(columns_before) - set(columns_after)
 
-            initial_rows = len(df_cleaned)
-            for col in numeric_cols:
-                if df_cleaned[col].var() > 0:
-                    Q1 = df_cleaned[col].quantile(0.25)
-                    Q3 = df_cleaned[col].quantile(0.75)
-                    IQR = Q3 - Q1
+        numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
+        non_numeric_cols = df_cleaned.select_dtypes(exclude=[np.number]).columns
+
+        if not numeric_cols.empty:
+            imputer = KNNImputer(n_neighbors=5)
+            df_cleaned[numeric_cols] = pd.DataFrame(imputer.fit_transform(df_cleaned[numeric_cols]), columns=numeric_cols)
+
+        if not non_numeric_cols.empty:
+            for col in non_numeric_cols:
+                mode_value = df_cleaned[col].mode()
+                df_cleaned[col] = df_cleaned[col].fillna(mode_value[0] if not mode_value.empty else '')
+
+        for col in non_numeric_cols:
+            try:
+                df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce')
+            except:
+                pass
+
+        initial_rows = len(df_cleaned)
+        for col in numeric_cols:
+            if col in df_cleaned.columns and df_cleaned[col].var() > 0:
+                Q1 = df_cleaned[col].quantile(0.25)
+                Q3 = df_cleaned[col].quantile(0.75)
+                IQR = Q3 - Q1
+                if not np.isnan(IQR) and not np.isinf(IQR):
                     lower_bound = Q1 - 1.5 * IQR
                     upper_bound = Q3 + 1.5 * IQR
                     df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
-                    logging.debug(f"داده‌های پرت برای ستون {col} حذف شدند.")
-                else:
-                    logging.debug(f"ستون {col} واریانس صفر دارد و از حذف پرت‌ها صرف‌نظر شد.")
 
-            if len(df_cleaned) < 2 or df_cleaned[numeric_cols].dropna().empty:
-                logging.error("پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
-                raise HTTPException(status_code=400, detail="پس از پاک‌سازی، داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
+        if len(df_cleaned) < 2 or df_cleaned[numeric_cols].dropna().empty:
+            raise HTTPException(status_code=400, detail="داده‌های کافی یا ستون‌های عددی معتبر باقی نمانده است.")
 
-            self.df = df_cleaned
-            logging.info(f"پاک‌سازی داده‌ها با موفقیت انجام شد. ردیف‌های اولیه: {initial_rows}, ردیف‌های نهایی: {len(df_cleaned)}")
-            return {
-                "initial_rows": initial_rows,
-                "cleaned_rows": len(df_cleaned),
-                "message": "مقادیر گمشده پرشده با میانگین (ستون‌های عددی) و مد یا رشته خالی (ستون‌های غیرعددی). داده‌های پرت حذف شدند (روش IQR)."
-            }
-        except Exception as e:
-            logging.error(f"خطا در پاک‌سازی داده‌ها: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در پاک‌سازی داده‌ها: {str(e)}")
+        self.df = df_cleaned
+        return {
+            "initial_rows": initial_rows,
+            "cleaned_rows": len(df_cleaned),
+            "numeric_columns": numeric_cols.tolist(),
+            "non_numeric_columns": non_numeric_cols.tolist(),
+            "dropped_columns": list(dropped_columns),
+            "message": "مقادیر گمشده پر شدند و داده‌های پرت حذف شدند."
+        }
 
     def mine_data(self):
         if self.df is None:
-            logging.error("هیچ داده‌ای برای داده‌کاوی وجود ندارد.")
             raise HTTPException(status_code=400, detail="لطفاً ابتدا فایل CSV یا Excel را بارگذاری کنید.")
-        try:
-            desc_stats = self.df.describe(include='all').to_dict()
-            numeric_cols = self.df.select_dtypes(include=[np.number]).columns
-            corr_matrix = self.df[numeric_cols].corr().to_dict() if not numeric_cols.empty else {}
-            outlier_report = {}
-            for col in numeric_cols:
+
+        desc_stats = self.df.describe(include='all').replace([np.inf, -np.inf], np.nan).fillna(0).to_dict()
+        numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+        corr_matrix = self.df[numeric_cols].corr().replace([np.inf, -np.inf], np.nan).fillna(0).to_dict() if not numeric_cols.empty else {}
+
+        outlier_report = {}
+        for col in numeric_cols:
+            if self.df[col].var() > 0:
                 Q1 = self.df[col].quantile(0.25)
                 Q3 = self.df[col].quantile(0.75)
                 IQR = Q3 - Q1
-                lower_bound = Q1 - 1.5 * IQR
-                upper_bound = Q3 + 1.5 * IQR
-                outliers = self.df[(self.df[col] < lower_bound) | (self.df[col] > upper_bound)][col]
-                outlier_report[col] = len(outliers)
-            logging.info("داده‌کاوی با موفقیت انجام شد.")
-            return {
-                "descriptive_stats": desc_stats,
-                "correlation_matrix": corr_matrix,
-                "outlier_report": outlier_report
-            }
-        except Exception as e:
-            logging.error(f"خطا در داده‌کاوی: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"خطا در داده‌کاوی: {str(e)}")
+                if np.isnan(IQR) or np.isinf(IQR):
+                    outlier_report[col] = 0
+                else:
+                    lower_bound = Q1 - 1.5 * IQR
+                    upper_bound = Q3 + 1.5 * IQR
+                    outliers = self.df[(self.df[col] < lower_bound) | (self.df[col] > upper_bound)][col]
+                    outlier_report[col] = len(outliers)
+            else:
+                outlier_report[col] = 0
+
+        return {
+            "descriptive_stats": desc_stats,
+            "correlation_matrix": corr_matrix,
+            "outlier_report": outlier_report
+        }
 
 class Predictor:
     def __init__(self, data_processor: DataProcessor):
